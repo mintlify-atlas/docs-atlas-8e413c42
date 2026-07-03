@@ -1,0 +1,110 @@
+---
+title: "POST /api/v1/inventario/{productoId}/descontar"
+sidebarTitle: "POST Descontar"
+description: "POST /api/v1/inventario/{productoId}/descontar — atomically decrements stock for a product by the given quantity. Returns 400 if stock is insufficient."
+---
+
+This endpoint performs an atomic, transactional decrement of available stock for a given product. It is the core write operation of `servicio-inventario` and is designed to be called as part of a larger SAGA transaction orchestrated by `servicio-ventapos`. The decrement only proceeds when the current `stockDisponible` is greater than or equal to the requested `cantidad`; otherwise the operation is rejected and no data is modified. Because the method is annotated with `@Transactional`, partial writes cannot occur even under concurrent load.
+
+## Endpoint
+
+```
+POST /api/v1/inventario/{productoId}/descontar
+```
+
+## Path Parameters
+
+<ParamField path="productoId" type="string" required>
+  The unique product identifier of the item whose stock should be decremented. Must correspond to an existing record in the `inventario` table. Example: `PROD-001`.
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="cantidad" type="integer" required>
+  The number of units to subtract from the product's current `stockDisponible`. Must be a positive integer. The operation is rejected if `stockDisponible < cantidad`.
+</ParamField>
+
+## Responses
+
+<ResponseField name="200 OK" type="string">
+  Returned when the stock decrement succeeds. Response body is the plain string:
+
+  ```
+  Stock descontado exitosamente
+  ```
+</ResponseField>
+
+<ResponseField name="400 Bad Request" type="string">
+  Returned when the stock is insufficient to fulfil the request, or when the `productoId` is not found in the database. Response body is the plain string:
+
+  ```
+  Stock insuficiente o producto no encontrado
+  ```
+</ResponseField>
+
+## Example Request
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/inventario/PROD-001/descontar?cantidad=5"
+```
+
+## Example Responses
+
+**Success (200 OK):**
+
+```
+Stock descontado exitosamente
+```
+
+**Failure — insufficient stock or product not found (400 Bad Request):**
+
+```
+Stock insuficiente o producto no encontrado
+```
+
+## Business Rules
+
+- **Atomic operation:** The service method is annotated `@Transactional`, so the read-check-write sequence is executed within a single database transaction. If any step fails, the transaction is rolled back automatically.
+- **Stock guard:** The decrement only executes if `inventario.getStockDisponible() >= cantidad`. If this condition is not met, the method returns `false` and the controller responds with HTTP 400. No data is written.
+- **Product not found:** If `inventarioRepository.findByProductoId(productoId)` returns an empty `Optional`, a `RuntimeException` is thrown (`"Producto no encontrado en inventario"`), which is caught by the controller logic and results in an HTTP 400 response.
+- **No fractional quantities:** `cantidad` is an `Integer` — decimal values are not accepted.
+
+## Source Implementation
+
+The controller method in `InventarioController.java`:
+
+```java
+@PostMapping("/{productoId}/descontar")
+public ResponseEntity<String> descontarStock(
+        @PathVariable String productoId,
+        @RequestParam Integer cantidad) {
+
+    boolean exito = inventarioService.descontarStock(productoId, cantidad);
+    if (exito) {
+        return ResponseEntity.ok("Stock descontado exitosamente");
+    } else {
+        return ResponseEntity.badRequest().body("Stock insuficiente o producto no encontrado");
+    }
+}
+```
+
+The transactional service method in `InventarioService.java`:
+
+```java
+@Transactional
+public boolean descontarStock(String productoId, Integer cantidad) {
+    Inventario inventario = inventarioRepository.findByProductoId(productoId)
+            .orElseThrow(() -> new RuntimeException("Producto no encontrado en inventario"));
+
+    if (inventario.getStockDisponible() >= cantidad) {
+        inventario.setStockDisponible(inventario.getStockDisponible() - cantidad);
+        inventarioRepository.save(inventario);
+        return true;
+    }
+    return false;
+}
+```
+
+<Warning>
+  This endpoint is called internally by `servicio-ventapos` as part of SAGA-based sale transactions. If you call it directly — for example, from a test script or admin tool — you may decrement stock without the corresponding sale record being created in the POS system. This creates an inventory inconsistency that cannot be automatically corrected. Only call this endpoint directly when you fully understand the downstream implications and have a manual reconciliation plan.
+</Warning>

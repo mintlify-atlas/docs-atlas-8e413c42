@@ -1,0 +1,83 @@
+---
+title: "GET /api/v1/inventario/{productoId}/stock"
+sidebarTitle: "GET Stock"
+description: "GET /api/v1/inventario/{productoId}/stock — retrieves the current available stock count for a product. Returns an integer, or 0 if the product is not found."
+---
+
+This endpoint retrieves the current available stock count for a single product identified by its `productoId`. The response is a plain integer — not a JSON object — representing how many units are currently available in the inventory table. If the requested `productoId` does not exist in the database, the endpoint returns `0` rather than an error, making it safe to call speculatively without prior existence checks.
+
+## Endpoint
+
+```
+GET /api/v1/inventario/{productoId}/stock
+```
+
+## Path Parameters
+
+<ParamField path="productoId" type="string" required>
+  The unique product identifier stored in the `inventario` table. This value corresponds to the `productoId` column, which has a `UNIQUE` constraint in PostgreSQL. Example: `PROD-001`.
+</ParamField>
+
+## Response
+
+<ResponseField name="body" type="integer">
+  A plain integer representing the number of units currently available for the given product. This is the value stored in the `stockDisponible` column of the `inventario` table.
+
+  Returns `0` if no inventory record is found for the given `productoId` — the endpoint does not return a 404 in this case.
+</ResponseField>
+
+## Example Request
+
+```bash
+curl -X GET http://localhost:8080/api/v1/inventario/PROD-001/stock
+```
+
+## Example Response
+
+```
+42
+```
+
+## Source Implementation
+
+The controller method handling this request, located in `InventarioController.java`:
+
+```java
+@GetMapping("/{productoId}/stock")
+public ResponseEntity<Integer> consultarStock(@PathVariable String productoId) {
+    return ResponseEntity.ok(inventarioService.getStock(productoId));
+}
+```
+
+The corresponding service method in `InventarioService.java`, which queries the PostgreSQL repository:
+
+```java
+public Integer getStock(String productoId) {
+    return inventarioRepository.findByProductoId(productoId)
+            .map(Inventario::getStockDisponible)
+            .orElse(0);
+}
+```
+
+The `Inventario` entity backing this query is defined as:
+
+```java
+@Entity
+@Table(name = "inventario")
+public class Inventario {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String productoId;
+
+    @Column(nullable = false)
+    private Integer stockDisponible;
+}
+```
+
+<Note>
+  The controller's internal `@RequestMapping` is `/api/inventario`, making the full internal path `/api/inventario/{productoId}/stock`. The API Gateway intercepts requests at `/api/v1/inventario/**` and forwards them to `servicio-inventario` on port 8081, where the service receives the path as-is. Always use the gateway-prefixed form `/api/v1/inventario/{productoId}/stock` in client code.
+</Note>

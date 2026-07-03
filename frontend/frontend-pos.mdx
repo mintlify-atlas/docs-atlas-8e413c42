@@ -1,0 +1,170 @@
+---
+title: "POS Terminal: React Frontend for Physical Stores"
+sidebarTitle: "POS Terminal"
+description: "The frontend-pos app is a React 19 + Vite single-page application powering in-store point-of-sale terminals, integrated with the POS sales orchestrator via the API Gateway."
+---
+
+The `frontend-pos` application is the in-store channel frontend for InnovaTech SOA. It is a fully independent React single-page application, separate from the `frontend-web` storefront, and is purpose-built for physical store point-of-sale terminals. Rather than browsing a catalog, operators use this app to submit sales transactions that are processed by the POS sales orchestrator (`servicio-ventapos`) through the API Gateway on port `8080`.
+
+## Tech Stack
+
+`frontend-pos` shares the same modern toolchain as `frontend-web`, as confirmed by `package.json`:
+
+| Technology | Version | Role |
+|---|---|---|
+| React | 19.2 | UI component library |
+| React DOM | 19.2 | DOM rendering |
+| Vite | 8.1 | Dev server and build tool |
+| @vitejs/plugin-react | 6.0.2 | Babel-based Fast Refresh |
+| oxlint | 1.69.0 | Fast Rust-based linter |
+| @types/react | 19.2 | TypeScript type definitions |
+| @types/react-dom | 19.2 | TypeScript type definitions for DOM |
+
+Like `frontend-web`, the project uses ES Modules (`"type": "module"`) throughout.
+
+## Getting Started
+
+<Steps>
+  <Step title="Navigate to the directory">
+    From the repository root, move into the POS frontend folder:
+
+    ```bash
+    cd frontend-pos
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install all required packages using your preferred package manager:
+
+    <CodeGroup>
+      ```bash npm
+      npm install
+      ```
+
+      ```bash yarn
+      yarn install
+      ```
+
+      ```bash pnpm
+      pnpm install
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Start the development server">
+    Launch Vite's dev server. The app starts on Vite's default port:
+
+    ```bash
+    npm run dev
+    ```
+
+    The POS terminal UI will be available at `http://localhost:5173`. If `frontend-web` is running at the same time, configure a different port — see the tip at the bottom of this page.
+  </Step>
+
+  <Step title="Build for production">
+    Compile and bundle the application for deployment to POS terminal hardware or a local kiosk server:
+
+    ```bash
+    npm run build
+    ```
+
+    Output is written to the `dist/` directory.
+  </Step>
+</Steps>
+
+<Warning>
+  The POS terminal must have a live connection to `servicio-ventapos` via the API Gateway for sales to process correctly. If the API Gateway (`port 8080`) or `servicio-ventapos` (`port 8082`) is not running, sale submissions will fail and transactions will not be recorded.
+</Warning>
+
+## POS Integration
+
+All POS transactions are submitted as HTTP POST requests to the API Gateway, which routes the `/api/v1/ventas-pos/**` path prefix upstream to `servicio-ventapos` on port `8082`. The gateway's `application.yml` defines this routing rule:
+
+```yaml
+- id: ruta-orquestador-pos
+  uri: http://localhost:8082
+  predicates:
+    - Path=/api/v1/ventas-pos/**
+```
+
+A sale transaction is initiated by POSTing a JSON payload to `/api/v1/ventas-pos/sale`. The following example shows a minimal sale request:
+
+```js
+fetch('http://localhost:8080/api/v1/ventas-pos/sale', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    productoId: 'PROD-001',
+    cantidad: 1,
+    clienteId: 'CLI-001'
+  })
+})
+  .then((res) => res.json())
+  .then((data) => console.log('Sale recorded:', data))
+  .catch((err) => console.error('POS gateway error:', err))
+```
+
+The `servicio-ventapos` orchestrator receives the request and coordinates any downstream operations such as inventory updates via `servicio-inventario` (`/api/v1/inventario/**` on port `8081`).
+
+## Differences from Web Storefront
+
+Although `frontend-pos` and `frontend-web` share the same technology stack, they serve distinct business channels and must be treated as separate applications:
+
+| Aspect | frontend-web | frontend-pos |
+|---|---|---|
+| Channel | Digital / online customers | Physical store operators |
+| Primary API route | `/api/v1/catalogo/**` | `/api/v1/ventas-pos/**` |
+| Upstream service | servicio-catalogo (port 8084) | servicio-ventapos (port 8082) |
+| Interaction model | Browse products, place online orders | Submit point-of-sale transactions |
+| Deployment target | Web hosting / CDN | In-store kiosk or terminal hardware |
+
+The two apps have no shared state or shared modules. Each is a self-contained Vite project with its own `package.json`, `vite.config.js`, and `src/` tree.
+
+## Project Structure
+
+| Path | Description |
+|---|---|
+| `index.html` | HTML entry point; mounts the `#root` div and loads `src/main.jsx` as an ES module |
+| `src/main.jsx` | Application entry point; renders the root `<App />` component into `#root` |
+| `src/App.jsx` | Root React component; top-level layout for the POS terminal interface |
+| `src/App.css` | Component-scoped styles for `App.jsx` |
+| `src/index.css` | Global baseline styles applied across the entire application |
+| `src/assets/` | Static assets imported directly into components (e.g. `react.svg`, `vite.svg`, `hero.png`) |
+| `public/favicon.svg` | Browser tab icon, served at `/favicon.svg` |
+| `public/icons.svg` | SVG sprite sheet referenced by `<use href="/icons.svg#...">` in components |
+| `vite.config.js` | Vite configuration; registers the `@vitejs/plugin-react` plugin |
+
+## Available Scripts
+
+The following scripts are defined in `package.json`:
+
+| Script | Command | Description |
+|---|---|---|
+| `dev` | `vite` | Starts the Vite development server with HMR on `http://localhost:5173` |
+| `build` | `vite build` | Bundles the app for production into the `dist/` directory |
+| `lint` | `oxlint` | Runs the oxlint static analyser across the project source |
+| `preview` | `vite preview` | Serves the production `dist/` build locally for pre-deploy verification |
+
+<Tip>
+  Because `frontend-pos` and `frontend-web` are fully independent apps with no shared state, you can run both simultaneously during development. To avoid a port conflict, override the dev server port for one of them. For example, start the POS terminal on port `5174` with:
+
+  ```bash
+  npx vite --port 5174
+  ```
+
+  Or set a permanent port in `vite.config.js`:
+
+  ```js
+  import { defineConfig } from 'vite'
+  import react from '@vitejs/plugin-react'
+
+  export default defineConfig({
+    plugins: [react()],
+    server: {
+      port: 5174,
+    },
+  })
+  ```
+
+  Both frontends can share the same API Gateway on port `8080` without any conflict.
+</Tip>

@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "InnovaTech SOA",
+  "projectType": "saas",
+  "projectName": "InnovaTech SOA",
+  "projectDescription": "An omnichannel e-commerce platform built on Service-Oriented Architecture (SOA), integrating physical POS and digital web channels through independent microservices, a centralized API Gateway, and SAGA-based transaction orchestration.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#1A6FE8",
-    "light": "#EAF1FD",
-    "dark": "#0D3E8A"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/Nelsoncg98/InnovaTech"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/Nelsoncg98/InnovaTech"
-    }
-  },
+  "primaryColor": "#1A6FE8",
+  "lightColor": "#EAF1FD",
+  "darkColor": "#0D3E8A",
   "navigation": {
     "tabs": [
       {
@@ -89,5 +77,25 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "SOA architecture with Database-per-Service isolation pattern",
+    "Centralized Spring Cloud Gateway routing all traffic on port 8080",
+    "Netflix Eureka service discovery for dynamic service registration",
+    "SAGA pattern with logical rollback for distributed POS transactions",
+    "Dual database strategy: PostgreSQL for transactional data, MongoDB for product catalog",
+    "Two React frontends: web storefront (frontend-web) and physical POS terminal (frontend-pos)",
+    "OpenAPI/Swagger UI auto-generated at /swagger-ui.html on each service",
+    "Docker Compose infrastructure bootstrap for local development"
+  ],
+  "publicApiSurface": [
+    "GET  /api/v1/inventario/{productoId}/stock — query available stock for a product",
+    "POST /api/v1/inventario/{productoId}/descontar?cantidad={n} — decrement stock",
+    "GET/POST /api/v1/catalogo/** — catalog product management (MongoDB-backed)",
+    "POST /api/v1/ventas-pos/** — POS sale transaction orchestrator with SAGA rollback",
+    "GET  /actuator/health — API Gateway health check",
+    "GET  /actuator/info — API Gateway build info",
+    "Eureka Dashboard — http://localhost:8761",
+    "Swagger UI — http://localhost:{port}/swagger-ui.html (per service)"
+  ]
 }

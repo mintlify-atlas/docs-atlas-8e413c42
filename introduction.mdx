@@ -1,0 +1,114 @@
+---
+title: "InnovaTech SOA: Omnichannel Commerce on Microservices"
+sidebarTitle: "Introduction"
+description: "Learn what InnovaTech SOA is, how its Service-Oriented Architecture works, and the core principles behind its omnichannel design."
+---
+
+InnovaTech SOA is an omnichannel e-commerce platform that unifies physical point-of-sale (POS) operations and digital web commerce under a single, cohesive backend. Built on strict Service-Oriented Architecture principles, it eliminates the data silos that plague traditional retail systems — where inventory, catalog, and customer records live in disconnected databases — by exposing every business capability as an independently deployable, loosely coupled service behind a centralized API Gateway.
+
+## What is InnovaTech SOA?
+
+InnovaTech SOA is the reference implementation for a modern, service-oriented commerce platform. It was designed from the ground up to serve two completely different retail channels simultaneously:
+
+- **Web channel** — a React 19 storefront that browses a MongoDB-backed product catalog and processes e-commerce orders.
+- **POS channel** — a React 19 point-of-sale application used by physical store staff to register walk-in sales, validate customer identities, and decrement warehouse inventory in real time.
+
+Both channels share the same backend services, routed through a Spring Cloud Gateway entry point. Each domain service owns its own database and exposes a versioned REST API under the `/api/v1/` prefix. Service registration and discovery are handled automatically by Netflix Eureka, removing hard-coded inter-service addresses from every service configuration.
+
+<Info>
+  InnovaTech SOA was developed as the capstone project for the Service-Oriented Architecture course (Arquitectura Orientada al Servicio — APF3). The codebase reflects production-grade SOA patterns applied to a real-world commerce problem.
+</Info>
+
+## Architecture Principles
+
+InnovaTech SOA is governed by three core design principles that together guarantee domain isolation, horizontal scalability, and transactional safety.
+
+### Service-Oriented Architecture (SOA)
+
+Every business capability — product catalog, inventory control, customer management, and POS orchestration — is encapsulated in its own Spring Boot service. Services communicate exclusively over HTTP REST, versioned under `/api/v1/`. No service accesses another service's database directly. This boundary enforcement means each service can be deployed, scaled, and updated independently without cascading risk to the rest of the system.
+
+### Database-per-Service Pattern
+
+Each domain service owns a dedicated, purpose-fit data store:
+
+- **PostgreSQL 15** handles transactional domains (inventory Kardex, customer records, POS sales) where ACID guarantees and relational joins matter.
+- **MongoDB 6.0** powers the product catalog, where flexible, document-oriented schemas allow rich product attributes without rigid table migrations.
+
+No cross-database JOINs exist in the system. Data shared between services is passed through API calls, ensuring true domain isolation.
+
+### SAGA Pattern (Compensating Transactions)
+
+POS sales are multi-step transactions that touch inventory, customer validation, and payment. InnovaTech implements the SAGA pattern in `servicio-ventapos`: each step in a sale is executed sequentially, and if any downstream service returns a failure, the orchestrator issues compensating rollback calls to undo the completed steps. This guarantees eventual consistency without distributed two-phase commits.
+
+<Note>
+  The SAGA implementation in InnovaTech is synchronous (choreography via direct REST calls from the orchestrator). An asynchronous, event-driven variant using a message broker is a natural next evolution of this architecture.
+</Note>
+
+## Service Inventory
+
+The following table lists every runtime component in the InnovaTech SOA platform, its assigned port, backing database, and primary responsibility.
+
+| Service | Port | Database | Role |
+|---|---|---|---|
+| `api-gateway` | `8080` | — | Single entry point for all frontend traffic; handles routing and global CORS |
+| `eureka-server` | `8761` | — | Service registry and discovery dashboard for all Spring Boot services |
+| `servicio-catalogo` | `8084` | MongoDB 6.0 | Product and pricing catalog for the web channel |
+| `servicio-inventario` | `8081` | PostgreSQL 15 | Kardex-based inventory control with logical warehouse segmentation (Web/Physical) |
+| `servicio-ventapos` | `8082` | PostgreSQL 15 | POS sales orchestrator; implements the SAGA pattern across inventory, customers, and payments |
+
+<Note>
+  `api-gateway` and `eureka-server` are infrastructure services with no business logic. They do not connect to any application database. All frontends communicate exclusively through `api-gateway` on port `8080` — they never call domain services directly.
+</Note>
+
+## Technology Stack
+
+InnovaTech SOA is built on a carefully chosen, modern open-source stack. Every version is pinned in the Maven POMs and Docker Compose manifest to ensure reproducible builds.
+
+| Layer | Technology | Version |
+|---|---|---|
+| Language | Java | 17 |
+| Backend framework | Spring Boot | 3.2.4 |
+| Cloud libraries | Spring Cloud | 2023.0.1 |
+| Service discovery | Netflix Eureka (Spring Cloud Netflix) | 2023.0.1 |
+| API gateway | Spring Cloud Gateway | 2023.0.1 |
+| Relational database | PostgreSQL | 15 (Alpine image) |
+| Document database | MongoDB | 6.0 |
+| Web frontend | React + Vite | React 19, Vite 8 |
+| POS frontend | React + Vite | React 19, Vite 8 |
+| Build tool | Apache Maven | 3.x |
+| Containerization | Docker + Docker Compose | 3.8 |
+
+---
+
+## Explore the Platform
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Spin up the full InnovaTech SOA stack on your local machine using Docker Compose and Maven in under 10 minutes.
+  </Card>
+  <Card
+    title="Architecture Overview"
+    icon="diagram-project"
+    href="/architecture-overview"
+  >
+    Deep dive into service layers, API Gateway routing rules, database isolation strategy, and the SAGA transaction model.
+  </Card>
+  <Card
+    title="API Gateway"
+    icon="shield"
+    href="/services/api-gateway"
+  >
+    Learn how the Spring Cloud Gateway routes requests, applies global CORS policies, and exposes health endpoints.
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/overview"
+  >
+    Explore the versioned REST endpoints exposed by each domain service, with request/response schemas and curl examples.
+  </Card>
+</CardGroup>

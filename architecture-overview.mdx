@@ -1,0 +1,245 @@
+---
+title: "InnovaTech SOA Architecture and Service Topology"
+sidebarTitle: "Architecture"
+description: "Deep dive into InnovaTech's SOA topology: service layers, data isolation patterns, API Gateway routing rules, and the SAGA transaction model."
+---
+
+InnovaTech SOA is structured as a layered Service-Oriented Architecture in which every runtime component has a clearly defined responsibility boundary. Infrastructure services handle cross-cutting concerns — routing, discovery, and configuration — while domain services encapsulate business logic and own their data stores exclusively. This page documents each architectural layer, the gateway routing table derived from the real `application.yml`, the database isolation strategy, the service discovery mechanism, and the SAGA transaction model used to guarantee consistency across the POS sales flow.
+
+---
+
+## Architectural Layers
+
+The platform is divided into three horizontal layers. Each layer depends only on services in lower layers, preventing circular dependencies and making the topology easy to reason about.
+
+<CardGroup cols={3}>
+  <Card
+    title="Infrastructure Layer"
+    icon="server"
+    href="/services/api-gateway"
+  >
+    **API Gateway** (port 8080) and **Eureka Server** (port 8761). These services have no business logic and no application database. They handle request routing, global CORS, service registration, and health discovery for the entire platform.
+  </Card>
+  <Card
+    title="Orchestration Layer"
+    icon="sitemap"
+    href="/api/overview"
+  >
+    **servicio-ventapos** (port 8082). The POS sales orchestrator acts as a Backend-for-Frontend for the physical store channel. It sequences calls to domain services and implements compensating rollbacks when any step in a sale fails (SAGA pattern).
+  </Card>
+  <Card
+    title="Domain Services Layer"
+    icon="database"
+    href="/api/overview"
+  >
+    **servicio-catalogo** (8084, MongoDB) and **servicio-inventario** (8081, PostgreSQL). These are pure entity services that expose CRUD operations over a single bounded context. They have no knowledge of each other and are consumed by the orchestration layer and directly by the web frontend.
+  </Card>
+</CardGroup>
+
+---
+
+## API Gateway Routing
+
+The Spring Cloud Gateway (`api-gateway`, port `8080`) is the sole ingress point for all frontend traffic. Every HTTP request from `frontend-web` and `frontend-pos` targets `http://localhost:8080` — neither frontend ever calls a domain service directly.
+
+Routes are configured statically in `api-gateway/src/main/resources/application.yml`:
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: ruta-catalogo
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/v1/catalogo/**
+
+        - id: ruta-orquestador-pos
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/ventas-pos/**
+
+        - id: ruta-inventario
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/inventario/**
+```
+
+The routing table in plain English:
+
+| Route ID | Incoming Path Prefix | Forwarded To | Service |
+|---|---|---|---|
+| `ruta-catalogo` | `/api/v1/catalogo/**` | `http://localhost:8084` | `servicio-catalogo` |
+| `ruta-orquestador-pos` | `/api/v1/ventas-pos/**` | `http://localhost:8082` | `servicio-ventapos` |
+| `ruta-inventario` | `/api/v1/inventario/**` | `http://localhost:8081` | `servicio-inventario` |
+
+### CORS Configuration
+
+The gateway applies a global CORS policy to every route using Spring Cloud Gateway's `globalcors` mechanism:
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+            allowedHeaders: "*"
+```
+
+All origins are permitted (`"*"`), and the four standard HTTP methods — `GET`, `POST`, `PUT`, `DELETE` — are explicitly allowed on every route. This policy is enforced at the gateway level so individual domain services do not need to configure CORS independently.
+
+<Tip>
+  In a production deployment, replace `allowedOrigins: "*"` with the specific domains of your web and POS frontends to prevent unauthorized cross-origin requests. The gateway is the single place to make this change — no service-level CORS configuration is needed.
+</Tip>
+
+### Gateway Actuator Endpoints
+
+The gateway exposes health and info actuator endpoints for liveness and readiness probes:
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+```
+
+These are reachable at `http://localhost:8080/actuator/health` and `http://localhost:8080/actuator/info`.
+
+---
+
+## Database Strategy
+
+InnovaTech enforces the **Database-per-Service** pattern: each domain service owns exactly one data store, and no other service has direct access to it. Cross-domain data exchange happens exclusively through HTTP API calls.
+
+### PostgreSQL 15 — Transactional Data
+
+Services that require ACID guarantees and relational consistency use PostgreSQL 15:
+
+- **`servicio-inventario`** — Manages the inventory Kardex with logical warehouse segmentation (web channel vs. physical store). Hibernate auto-generates the schema on startup (`ddl-auto: update`).
+- **`servicio-ventapos`** — Records POS transactions and customer associations. Uses Spring Data JPA with the PostgreSQL dialect.
+
+Both services connect to the same `innovatech_db` database on the shared `innovatech-postgres` Docker container, but each service manages only its own schema tables. The datasource configuration for `servicio-inventario` is:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/innovatech_db
+    username: innovatech
+    password: secretpassword
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+```
+
+<Tip>
+  `show-sql: true` is enabled in development to make JPA-generated queries visible in the service logs. Disable this in production to avoid verbose output and potential performance overhead on high-traffic endpoints.
+</Tip>
+
+### MongoDB 6.0 — Document Catalog
+
+The product catalog (`servicio-catalogo`) uses MongoDB 6.0 to store product documents. The flexible document model allows rich, variable-length product attributes (images, variants, specifications) without requiring table alterations. The connection URI includes authentication against the `admin` source database:
+
+```yaml
+spring:
+  data:
+    mongodb:
+      uri: mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin
+```
+
+<Note>
+  `servicio-catalogo` writes to the `innovatech_catalogo` database within the shared MongoDB container. This database is separate from any collections that other services might create, preserving logical domain isolation even within a shared container.
+</Note>
+
+---
+
+## Service Discovery
+
+InnovaTech uses **Netflix Eureka** (via Spring Cloud Netflix) for service registration and discovery. The Eureka Server runs as a standalone Spring Boot application on port `8761` and does not register itself with its own registry:
+
+```yaml
+# eureka-server/src/main/resources/application.yml
+server:
+  port: 8761
+
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+```
+
+Each domain service is configured as a Eureka client that registers on startup and renews its heartbeat every 30 seconds. The `prefer-ip-address: true` setting ensures services advertise their actual IP address instead of a hostname, which is essential in containerized or multi-host environments where hostname resolution may be unreliable:
+
+```yaml
+# Example from servicio-inventario/src/main/resources/application.yml
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+```
+
+The Eureka Dashboard at `http://localhost:8761` provides a real-time view of all registered service instances, their status (`UP` / `DOWN`), and the IP addresses they are advertising.
+
+<Tip>
+  If a service fails to appear in the Eureka dashboard after startup, check that `eureka-server` was started first and is reachable on port `8761`. Eureka clients retry registration automatically, but a misconfigured `defaultZone` URL will cause silent registration failures.
+</Tip>
+
+---
+
+## SAGA Pattern
+
+POS sales in InnovaTech involve multiple independent services: inventory must be checked and decremented, the customer identity must be validated, and a payment record must be created. Because these operations span service boundaries, a single database transaction cannot guarantee atomicity.
+
+InnovaTech solves this with the **SAGA pattern** implemented synchronously in `servicio-ventapos`. The orchestrator executes each step of a sale in sequence:
+
+1. **Validate customer** — call `servicio-clientes` to confirm the customer exists and is active.
+2. **Reserve inventory** — call `servicio-inventario` to decrement stock for each item in the sale.
+3. **Process payment** — apply the payment record locally in `servicio-ventapos`.
+4. **Confirm sale** — persist the completed sale record.
+
+If any step returns an error, the orchestrator issues **compensating transactions** in reverse order to undo the completed steps:
+
+| Failed Step | Compensating Action |
+|---|---|
+| Payment fails | Restore inventory (reverse the decrement via `servicio-inventario`) |
+| Inventory insufficient | Return an error immediately; no prior steps need rollback |
+| Customer invalid | Return an error immediately; no prior steps need rollback |
+
+This ensures the system never reaches a state where inventory has been decremented but no sale record exists, or vice versa.
+
+<Note>
+  The current SAGA implementation is **synchronous**: `servicio-ventapos` makes blocking HTTP calls to each downstream service in sequence and handles rollback in the same request thread. This keeps the implementation simple and observable but means a slow downstream service will block the entire sale transaction.
+</Note>
+
+---
+
+## Inter-Service Communication
+
+All inter-service communication in InnovaTech is **synchronous REST over HTTP**. There is no message broker or asynchronous event bus in the current architecture.
+
+The primary communication flows are:
+
+- **Frontend → API Gateway → Domain Service** — all read operations (browsing catalog, checking stock) follow this path.
+- **Frontend → API Gateway → servicio-ventapos → Domain Services** — all POS write operations (completing a sale) are orchestrated by `servicio-ventapos`, which fans out to `servicio-inventario` and `servicio-clientes` as required.
+
+`servicio-ventapos` uses Spring WebFlux's reactive `WebClient` (declared as a dependency in its `pom.xml`) to make non-blocking HTTP calls to downstream services during the SAGA orchestration flow. This allows the POS orchestrator to issue parallel downstream calls where the steps are independent, improving throughput on the critical sale path.
+
+<Tip>
+  If you plan to extend InnovaTech with asynchronous workflows — such as sending order confirmation emails or syncing inventory to a warehouse management system — consider introducing a lightweight message broker (e.g., RabbitMQ or Apache Kafka) between `servicio-ventapos` and the new downstream consumers. The existing synchronous SAGA can remain unchanged for the core sale flow.
+</Tip>

@@ -1,0 +1,141 @@
+---
+title: "Web Storefront: React Frontend for Digital Channel"
+sidebarTitle: "Web Storefront"
+description: "The frontend-web app is a React 19 + Vite single-page application serving the digital e-commerce channel, connecting to InnovaTech SOA through the API Gateway."
+---
+
+The `frontend-web` application is the digital channel frontend for InnovaTech SOA. It is one of two independent React single-page applications in the platform — the other being `frontend-pos` for physical store terminals. This app delivers the customer-facing web storefront and communicates exclusively with backend microservices through the API Gateway running on port `8080`.
+
+## Tech Stack
+
+`frontend-web` is built with a modern, minimal toolchain sourced directly from `package.json`:
+
+| Technology | Version | Role |
+|---|---|---|
+| React | 19.2 | UI component library |
+| React DOM | 19.2 | DOM rendering |
+| Vite | 8.1 | Dev server and build tool |
+| @vitejs/plugin-react | 6.0.2 | Babel-based Fast Refresh |
+| oxlint | 1.69.0 | Fast Rust-based linter |
+| @types/react | 19.2 | TypeScript type definitions |
+| @types/react-dom | 19.2 | TypeScript type definitions for DOM |
+
+The project uses ES Modules (`"type": "module"`) and ships TypeScript type definitions in `devDependencies`, enabling editor intellisense without requiring a full TypeScript compilation step.
+
+## Getting Started
+
+<Steps>
+  <Step title="Navigate to the directory">
+    From the repository root, move into the web frontend folder:
+
+    ```bash
+    cd frontend-web
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install all required packages using your preferred package manager:
+
+    <CodeGroup>
+      ```bash npm
+      npm install
+      ```
+
+      ```bash yarn
+      yarn install
+      ```
+
+      ```bash pnpm
+      pnpm install
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Start the development server">
+    Launch Vite's dev server with Hot Module Replacement (HMR) enabled. Vite serves the app on its default port:
+
+    ```bash
+    npm run dev
+    ```
+
+    The application will be available at `http://localhost:5173`.
+  </Step>
+
+  <Step title="Build for production">
+    Compile and bundle the application for deployment. The output is written to the `dist/` directory:
+
+    ```bash
+    npm run build
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  Backend microservices must be running before the frontend can display real data. At minimum, the API Gateway (`port 8080`) and `servicio-catalogo` (`port 8084`) must be up.
+</Note>
+
+## Project Structure
+
+The application follows the standard Vite + React layout. Key files and their roles are:
+
+| Path | Description |
+|---|---|
+| `index.html` | HTML entry point; mounts the `#root` div and loads `src/main.jsx` as an ES module |
+| `src/main.jsx` | Application entry point; renders the root `<App />` component into `#root` |
+| `src/App.jsx` | Root React component; top-level layout and routing anchor for the storefront |
+| `src/App.css` | Component-scoped styles for `App.jsx` |
+| `src/index.css` | Global baseline styles applied across the entire application |
+| `src/assets/` | Static assets imported directly into components (e.g. `react.svg`, `vite.svg`, `hero.png`) |
+| `public/favicon.svg` | Browser tab icon, served at `/favicon.svg` |
+| `public/icons.svg` | SVG sprite sheet referenced by `<use href="/icons.svg#...">` in components |
+| `vite.config.js` | Vite configuration; registers the `@vitejs/plugin-react` plugin |
+
+## API Integration
+
+All backend communication is routed through the API Gateway at `http://localhost:8080`. The gateway's `application.yml` defines the available route prefixes:
+
+| Route Prefix | Upstream Service | Port |
+|---|---|---|
+| `/api/v1/catalogo/**` | servicio-catalogo | 8084 |
+| `/api/v1/ventas-pos/**` | servicio-ventapos (POS orchestrator) | 8082 |
+| `/api/v1/inventario/**` | servicio-inventario | 8081 |
+
+For the web storefront, the primary integration point is the catalog service. The following example fetches all products:
+
+```js
+fetch('http://localhost:8080/api/v1/catalogo/products')
+  .then((res) => res.json())
+  .then((data) => console.log(data))
+  .catch((err) => console.error('Gateway unreachable:', err))
+```
+
+<Tip>
+  During development, add a `server.proxy` entry to `vite.config.js` so requests to `/api` are forwarded to the API Gateway automatically. This avoids hardcoding the full gateway URL in your component code and eliminates browser CORS preflight issues:
+
+  ```js
+  import { defineConfig } from 'vite'
+  import react from '@vitejs/plugin-react'
+
+  export default defineConfig({
+    plugins: [react()],
+    server: {
+      proxy: {
+        '/api': 'http://localhost:8080',
+      },
+    },
+  })
+  ```
+
+  After this change you can call `fetch('/api/v1/catalogo/products')` directly in your components.
+</Tip>
+
+## Available Scripts
+
+The following scripts are defined in `package.json`:
+
+| Script | Command | Description |
+|---|---|---|
+| `dev` | `vite` | Starts the Vite development server with HMR on `http://localhost:5173` |
+| `build` | `vite build` | Bundles the app for production into the `dist/` directory |
+| `lint` | `oxlint` | Runs the oxlint static analyser across the project source |
+| `preview` | `vite preview` | Serves the production `dist/` build locally for pre-deploy verification |

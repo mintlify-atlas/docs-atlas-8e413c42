@@ -1,0 +1,95 @@
+---
+title: "Catalog Service: MongoDB Product Management"
+sidebarTitle: "Catalog Service"
+description: "The Catalog Service (servicio-catalogo) manages product and pricing data using MongoDB, exposing REST endpoints on port 8084 with auto-generated Swagger UI."
+---
+
+The Catalog Service is the product data authority for the InnovaTech platform. It stores and serves product definitions and pricing information using MongoDB as its document store, which allows flexible, schema-free product records that can evolve without database migrations. The service exposes a REST API and automatically generates interactive OpenAPI documentation using SpringDoc, so developers can explore and test every endpoint directly from the browser without any additional tooling.
+
+## Overview
+
+`servicio-catalogo` is a **domain entity service** — it owns product and pricing data and is not responsible for orchestrating calls to other services. It runs on **port 8084** and uses **Spring Boot 3.2.4** with **Spring Data MongoDB** for persistence. **SpringDoc OpenAPI** (`springdoc-openapi-starter-webmvc-ui 2.3.0`) is included as a direct dependency and auto-generates a Swagger UI at startup by scanning the controller classes.
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="plug">
+    **8084** — direct service address
+  </Card>
+  <Card title="Database" icon="database">
+    MongoDB — `innovatech_catalogo`
+  </Card>
+  <Card title="Spring Boot" icon="leaf">
+    **3.2.4** / Java **17**
+  </Card>
+  <Card title="API Docs" icon="book">
+    Swagger UI auto-generated at `/swagger-ui.html`
+  </Card>
+</CardGroup>
+
+## Database Connection
+
+The service connects to a MongoDB instance using the URI defined in `application.yml`. Authentication is handled via the `authSource=admin` parameter, which directs the driver to validate credentials against MongoDB's built-in `admin` database.
+
+```yaml
+server:
+  port: 8084
+
+spring:
+  application:
+    name: servicio-catalogo
+  data:
+    mongodb:
+      uri: mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin
+
+# Configuracion de Swagger para que Luis pueda probar su API localmente
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+```
+
+| Property | Value | Description |
+|---|---|---|
+| `server.port` | `8084` | Port the service listens on |
+| `spring.application.name` | `servicio-catalogo` | Application name used in logs |
+| `spring.data.mongodb.uri` | `mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin` | Full MongoDB connection URI including credentials, host, and target database |
+| `springdoc.api-docs.path` | `/api-docs` | Path where the raw OpenAPI JSON spec is served |
+| `springdoc.swagger-ui.path` | `/swagger-ui.html` | Path where the interactive Swagger UI is served |
+
+## API Documentation
+
+SpringDoc scans the service's REST controllers at startup and generates a full OpenAPI 3.0 specification automatically. Two endpoints are available once the service is running:
+
+| URL | Description |
+|---|---|
+| `http://localhost:8084/swagger-ui.html` | Interactive Swagger UI — browse endpoints, view request/response schemas, and execute live calls |
+| `http://localhost:8084/api-docs` | Raw OpenAPI JSON specification — can be imported into Postman or other API tools |
+
+<Tip>
+  Use the Swagger UI at `http://localhost:8084/swagger-ui.html` to explore and test catalog endpoints interactively without writing any client code. The UI lets you fill in path parameters and request bodies through a browser form, fire the request, and inspect the full HTTP response — ideal for rapid development and manual testing.
+</Tip>
+
+## Dependencies
+
+| Dependency | Version | Purpose |
+|---|---|---|
+| `spring-boot-starter-web` | managed by Boot 3.2.4 | Exposes REST endpoints via Spring MVC |
+| `spring-boot-starter-data-mongodb` | managed by Boot 3.2.4 | Spring Data repositories backed by MongoDB |
+| `springdoc-openapi-starter-webmvc-ui` | **2.3.0** | Auto-generates OpenAPI spec and Swagger UI |
+| `lombok` | managed by Boot 3.2.4 | Eliminates boilerplate getters, setters, and constructors via annotations |
+| `spring-boot-starter-test` | managed (test scope) | JUnit 5, Mockito, and Spring Test utilities |
+
+## Running the Service
+
+Start the Catalog Service from its directory using the Maven wrapper:
+
+```bash
+cd servicio-catalogo
+mvn spring-boot:run
+```
+
+The service is ready when the log shows the Tomcat connector started on port 8084. Swagger UI will be immediately accessible at `http://localhost:8084/swagger-ui.html`.
+
+<Note>
+  The Catalog Service is accessed by frontend clients through the API Gateway, not directly. All catalog requests should target the gateway at `http://localhost:8080/api/v1/catalogo/**`, which forwards them to this service on port 8084. Direct access to port 8084 is intended for local development and testing only.
+</Note>

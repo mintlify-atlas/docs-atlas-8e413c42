@@ -1,0 +1,118 @@
+---
+title: "Database Strategy: PostgreSQL and MongoDB in InnovaTech"
+sidebarTitle: "Databases"
+description: "InnovaTech uses a Database-per-Service pattern with PostgreSQL for transactional data and MongoDB for the product catalog, ensuring domain isolation."
+---
+
+InnovaTech SOA deliberately employs two different database engines rather than a single shared schema. PostgreSQL handles structured, transactional data where relational integrity and ACID guarantees matter, while MongoDB stores the flexible, document-oriented product catalogue that benefits from schema-less design. Each microservice owns its data store exclusively — no service queries another service's database directly.
+
+## Database-per-Service Pattern
+
+The **Database-per-Service** pattern is a foundational SOA/microservices principle implemented throughout InnovaTech. Its key rules are:
+
+- **No shared schemas.** Each service is the sole owner and writer of its database. Other services that need the data must call the owning service's API.
+- **No cross-service joins.** Data aggregation happens at the orchestration layer (e.g. `servicio-ventapos`), not at the database level.
+- **Eventual consistency via events.** When a transaction spans multiple services, each service commits locally and propagates state changes through service calls or future event streams, implementing the SAGA pattern where needed.
+- **Independent schema evolution.** A service can migrate its schema without coordinating with unrelated services.
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL" icon="database">
+    Used by `servicio-inventario` (and planned for `servicio-clientes` and `servicio-ventapos`) for transactional, relational data such as Kardex stock movements and customer records.
+  </Card>
+  <Card title="MongoDB" icon="leaf">
+    Used exclusively by `servicio-catalogo` to store product and pricing documents. The flexible document model accommodates variable product attributes without schema migrations.
+  </Card>
+</CardGroup>
+
+## PostgreSQL
+
+PostgreSQL 15 (Alpine) is the relational engine for services that require ACID transactions and structured relationships.
+
+**Services using PostgreSQL:** `servicio-inventario` · `servicio-clientes` (planned) · `servicio-ventapos` (planned)
+
+| Property | Value |
+|----------|-------|
+| Docker image | `postgres:15-alpine` |
+| Host port | `5433` |
+| JDBC URL | `jdbc:postgresql://localhost:5433/innovatech_db` |
+| Username | `innovatech` |
+| Password | `secretpassword` |
+| Database name | `innovatech_db` |
+| Hibernate DDL mode | `update` (auto-creates and migrates tables on startup) |
+| JDBC driver | `org.postgresql.Driver` |
+| Hibernate dialect | `org.hibernate.dialect.PostgreSQLDialect` |
+
+The `ddl-auto: update` setting means Hibernate inspects the entity model on every startup and applies any schema changes automatically. This is convenient for development but should be replaced with a migration tool such as Flyway or Liquibase before production deployment.
+
+The datasource configuration as it appears in `servicio-inventario/src/main/resources/application.yml`:
+
+```yaml
+spring:
+  application:
+    name: servicio-inventario
+  datasource:
+    url: jdbc:postgresql://localhost:5433/innovatech_db
+    username: innovatech
+    password: secretpassword
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+```
+
+## MongoDB
+
+MongoDB 6.0 is the document store for the product catalogue. Its schema-less documents make it straightforward to represent products with varying attribute sets without requiring table alterations.
+
+**Services using MongoDB:** `servicio-catalogo`
+
+| Property | Value |
+|----------|-------|
+| Docker image | `mongo:6.0` |
+| Host port | `27017` |
+| Connection URI | `mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin` |
+| Database name | `innovatech_catalogo` |
+| Root username | `admin` |
+| Root password | `secretpassword` |
+| Auth source | `admin` (the root authentication database) |
+
+The MongoDB configuration as it appears in `servicio-catalogo/src/main/resources/application.yml`:
+
+```yaml
+spring:
+  application:
+    name: servicio-catalogo
+  data:
+    mongodb:
+      uri: mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin
+```
+
+## Connecting with a Database Client
+
+You can connect to either database directly for inspection, debugging, or manual data entry while the Docker Compose stack is running.
+
+**PostgreSQL — `psql` CLI:**
+
+```bash
+psql -h localhost -p 5433 -U innovatech -d innovatech_db
+```
+
+When prompted, enter the password `secretpassword`. Once connected you can run standard SQL queries against the `innovatech_db` database.
+
+**MongoDB — `mongosh` CLI:**
+
+```bash
+mongosh "mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin"
+```
+
+This opens a shell scoped to the `innovatech_catalogo` database where you can run collection queries and aggregation pipelines.
+
+<Tip>
+  If you prefer a graphical interface, both databases are supported by popular GUI clients. **TablePlus** and **DBeaver** work well with PostgreSQL (connect on `localhost:5433`). **MongoDB Compass** or the MongoDB tab in **TablePlus** can connect to MongoDB using the URI above. Docker Desktop also shows live container logs and resource stats for each running database container.
+</Tip>
+
+<Warning>
+  The credentials shown throughout this page (`innovatech` / `secretpassword`, `admin` / `secretpassword`) are committed in plaintext for local development convenience only. **Do not use these credentials in staging or production environments.** Before deploying outside your local machine, rotate all passwords and inject them via environment variables, a secrets manager, or Spring Cloud Config — never commit production credentials to source control.
+</Warning>

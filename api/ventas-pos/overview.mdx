@@ -1,0 +1,82 @@
+---
+title: "POS Sales Orchestrator API: SAGA-Based Transactions"
+sidebarTitle: "POS Sales API"
+description: "The POS Sales Orchestrator API accepts sale requests at /api/v1/ventas-pos/**, orchestrating inventory, customers, and payment via the SAGA pattern."
+---
+
+The POS Sales Service (`servicio-ventapos`) is the transaction orchestrator for InnovaTech's physical store channel. When a cashier completes a sale at a point-of-sale terminal, the POS frontend sends the sale request to this service, which takes responsibility for coordinating every downstream operation: validating the customer, decrementing inventory, and processing payment. Because these steps span multiple independent microservices — each with its own database — the orchestrator implements the **SAGA pattern** to guarantee that partial failures do not leave the system in an inconsistent state. All POS sales endpoints are accessed through the API Gateway at the `/api/v1/ventas-pos/**` namespace.
+
+## Base Path
+
+Access the POS Sales API through the gateway:
+
+```
+http://localhost:8080/api/v1/ventas-pos/**
+```
+
+The service also listens directly on port `8082` for local debugging:
+
+```
+http://localhost:8082
+```
+
+## Transaction Flow
+
+A complete sale transaction follows these orchestration steps in sequence:
+
+<Steps>
+  <Step title="Receive sale request">
+    The POS frontend submits a sale payload to `POST /api/v1/ventas-pos/...` via the API Gateway. The payload includes the customer identifier, a list of products with quantities, and the chosen payment method.
+  </Step>
+  <Step title="Validate customer">
+    The orchestrator calls `servicio-clientes` to confirm that the customer exists and is in good standing. If the customer cannot be validated, the transaction is rejected immediately and no further steps are taken.
+  </Step>
+  <Step title="Decrement inventory">
+    For each line item in the sale, the orchestrator calls `POST /api/inventario/{productoId}/descontar?cantidad={n}` on `servicio-inventario` (port 8081). Each call is atomic and transactional within the inventory service. If any product has insufficient stock, the SAGA enters rollback mode.
+  </Step>
+  <Step title="Process payment">
+    With inventory secured, the orchestrator submits the payment to the configured external payment gateway. This step is currently planned and under development.
+  </Step>
+  <Step title="Confirm sale and return receipt">
+    If all steps succeed, the orchestrator persists the sale record and returns a receipt to the POS frontend. The transaction is considered complete.
+  </Step>
+  <Step title="Execute compensating transactions on failure">
+    If any step fails after a previous step has already made state changes, the orchestrator executes compensating transactions in reverse order to restore the system to its pre-sale state. See the SAGA Rollback section below for details.
+  </Step>
+</Steps>
+
+## SAGA Rollback
+
+InnovaTech's SAGA implementation uses **logical compensating transactions** rather than two-phase commit (2PC). This means that if a failure occurs mid-transaction, the orchestrator does not attempt to undo database changes at the protocol level — instead, it explicitly calls corrective operations on each affected service.
+
+The most common rollback scenario is a payment failure after inventory has already been decremented. In this case, the orchestrator calls a stock-restore operation on `servicio-inventario` to add back the units that were subtracted during step 3. Each compensating action is idempotent where possible to handle retries safely.
+
+<Note>
+  Because SAGA uses compensating rollback rather than 2PC, there is a brief window between a step succeeding and its compensation completing where the system is in an intermediate state. This is **eventual consistency** by design. Clients should not assume that a failed sale response means zero state change occurred — always verify system state through the individual service endpoints if precise consistency is required.
+</Note>
+
+## Integration Dependencies
+
+The POS Sales Orchestrator depends on the following services being reachable at their respective ports:
+
+| Dependency | Port | Status |
+|---|---|---|
+| `servicio-inventario` | 8081 | Active — inventory decrement and restore |
+| `servicio-clientes` | TBD | Planned — customer validation |
+| External payment gateway | — | Planned — payment processing |
+
+If `servicio-inventario` is unavailable when a sale is submitted, the transaction will fail at step 3 and no inventory changes will have been made. Ensure all active dependencies are running before processing sales.
+
+## Running the Service
+
+Start the POS Sales Orchestrator from the project root:
+
+```bash
+cd servicio-ventapos && mvn spring-boot:run
+```
+
+The service will start on port `8082` and register with the Eureka service registry at `http://localhost:8761/eureka/`.
+
+<Warning>
+  Always route POS sale requests through the API Gateway at `http://localhost:8080/api/v1/ventas-pos/**`. Bypassing the gateway by calling port 8082 directly means requests skip the global CORS policy, miss any future gateway-level filters (rate limiting, authentication), and may behave inconsistently in environments where the direct port is not exposed. The gateway path is the only supported interface for clients.
+</Warning>

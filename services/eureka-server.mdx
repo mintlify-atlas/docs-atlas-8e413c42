@@ -1,0 +1,124 @@
+---
+title: "Eureka Server: Service Discovery for InnovaTech SOA"
+sidebarTitle: "Eureka Server"
+description: "The Netflix Eureka Server provides dynamic service registration and discovery, enabling microservices to locate each other without hardcoded addresses."
+---
+
+The Eureka Server is the service registry at the heart of the InnovaTech SOA platform. Rather than hardcoding the network address of every microservice into callers, each service registers itself with Eureka on startup and discovers its peers by looking them up by name. This decouples service consumers from the physical addresses of their dependencies, making the system resilient to port changes, horizontal scaling, and environment differences between development and production.
+
+## Overview
+
+The server runs on **port 8761**, the conventional default for Netflix Eureka. It is annotated with `@EnableEurekaServer`, which activates the full Eureka registry and web dashboard within the Spring Boot application. The instance is configured in **standalone mode** — it does not attempt to register itself as a Eureka client or fetch the registry from a peer node, keeping the local development topology simple.
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="plug">
+    **8761** — standard Eureka default port
+  </Card>
+  <Card title="Spring Boot" icon="leaf">
+    **3.1.2** with Spring Cloud **2022.0.4**
+  </Card>
+  <Card title="Mode" icon="server">
+    Standalone — no peer replication
+  </Card>
+  <Card title="Dashboard" icon="chart-bar">
+    Web UI available at `http://localhost:8761`
+  </Card>
+</CardGroup>
+
+## Application Entry Point
+
+The application is a minimal Spring Boot main class. The single `@EnableEurekaServer` annotation is all that is required to activate the Eureka registry; Spring Cloud auto-configures everything else based on properties.
+
+```java
+package com.innovatech.eureka;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.netflix.eureka.server.EnableEurekaServer;
+
+@SpringBootApplication
+@EnableEurekaServer
+public class EurekaServerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EurekaServerApplication.class, args);
+    }
+}
+```
+
+## Configuration
+
+The `application.yml` file configures Eureka to run as a self-contained standalone server. The two critical flags — `register-with-eureka: false` and `fetch-registry: false` — prevent the server from treating itself as a client and endlessly trying to register with itself or replicate state to a non-existent peer.
+
+```yaml
+server:
+  port: 8761
+
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+```
+
+| Property | Value | Description |
+|---|---|---|
+| `server.port` | `8761` | Port the Eureka server listens on |
+| `eureka.instance.hostname` | `localhost` | Hostname advertised to clients |
+| `eureka.client.register-with-eureka` | `false` | Prevents the server from self-registering as a client |
+| `eureka.client.fetch-registry` | `false` | Prevents the server from fetching its own registry |
+| `eureka.client.service-url.defaultZone` | `http://localhost:8761/eureka/` | The registry URL (used by client services to register) |
+
+## Accessing the Dashboard
+
+When the server is running, Netflix Eureka provides a built-in web dashboard that shows all currently registered instances, their health status, and metadata such as IP address and port.
+
+Open the following URL in a browser:
+
+```
+http://localhost:8761
+```
+
+The dashboard displays:
+- **System Status** — uptime, environment, and data center
+- **Instances currently registered with Eureka** — a table listing each service by application name, availability zone, and status
+- **General Info** — total registered services and renewal thresholds
+
+## Service Registration
+
+Any microservice that includes `spring-cloud-starter-netflix-eureka-client` on its classpath will auto-register with Eureka on startup. The two key properties that client services must set are:
+
+```yaml
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+```
+
+| Property | Purpose |
+|---|---|
+| `eureka.client.service-url.defaultZone` | Points the client at the Eureka server's registration endpoint |
+| `eureka.instance.prefer-ip-address: true` | Registers the service's IP address rather than its hostname, which is more reliable in containerized or multi-network environments |
+
+In the InnovaTech platform, `servicio-inventario` is an example of a service that uses these exact settings — see its configuration in the [Inventory Service](/services/servicio-inventario) page.
+
+<Note>
+  The Eureka Server **must be started before** any other microservice. If a client service starts before Eureka is available, it will fail to register and its endpoints will not be discoverable by other services. When running locally, always start `eureka-server` first, then start the downstream services.
+</Note>
+
+## Running the Server
+
+```bash
+cd eureka-server
+mvn spring-boot:run
+```
+
+The server is ready when you see a log line similar to:
+
+```
+Started EurekaServerApplication in 4.3 seconds (JVM running for 4.7)
+```

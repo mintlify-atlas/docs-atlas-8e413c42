@@ -1,0 +1,137 @@
+---
+title: "API Gateway: Centralized Routing and CORS for InnovaTech"
+sidebarTitle: "API Gateway"
+description: "The Spring Cloud Gateway service routes all frontend traffic on port 8080, enforces CORS policies, and forwards requests to downstream microservices."
+---
+
+The API Gateway is the single entry point for all client traffic in the InnovaTech SOA platform. Every request from the React frontends — whether for catalog browsing, inventory queries, or point-of-sale transactions — arrives here first. The gateway matches the request path against a set of configured routes and forwards it to the appropriate downstream microservice, decoupling clients from individual service addresses and centralizing cross-cutting concerns like CORS policy enforcement.
+
+## Overview
+
+The gateway is built on **Spring Cloud Gateway** (Spring Cloud `2023.0.1`), which uses a fully reactive, non-blocking I/O model powered by Project Reactor and Netty. This makes it well-suited as a perimeter router that can handle high concurrency without dedicating a thread per connection. It runs on **port 8080** — the fixed address that all frontend applications are configured to call.
+
+**Spring Boot Actuator** is included to expose operational endpoints so that infrastructure tooling can verify the gateway's health and collect metadata without requiring access to application logs.
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="plug">
+    **8080** — all frontend and client traffic targets this port
+  </Card>
+  <Card title="Spring Cloud Version" icon="cloud">
+    **2023.0.1** — uses Spring Cloud Gateway (reactive)
+  </Card>
+  <Card title="Java Version" icon="coffee">
+    **Java 17** with Spring Boot **3.2.4**
+  </Card>
+  <Card title="Routing Model" icon="arrow-right-arrow-left">
+    Non-blocking, predicate-based path routing
+  </Card>
+</CardGroup>
+
+## Route Configuration
+
+The gateway defines three named routes in `application.yml`. Each route maps a URL path prefix to a specific downstream service. Requests are forwarded verbatim — the path is not rewritten.
+
+| Route ID | Path Predicate | Upstream URI |
+|---|---|---|
+| `ruta-catalogo` | `/api/v1/catalogo/**` | `http://localhost:8084` |
+| `ruta-orquestador-pos` | `/api/v1/ventas-pos/**` | `http://localhost:8082` |
+| `ruta-inventario` | `/api/v1/inventario/**` | `http://localhost:8081` |
+
+The full `application.yml` for the gateway is:
+
+```yaml
+server:
+  port: 8080 # El Frontend siempre apuntara aqui
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+            allowedHeaders: "*"
+      routes:
+        # Ruta para el servicio de Luis
+        - id: ruta-catalogo
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/v1/catalogo/**
+
+        # Ruta para nuestro Orquestador
+        - id: ruta-orquestador-pos
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/ventas-pos/**
+
+        # Ruta para nuestro Inventario
+        - id: ruta-inventario
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/inventario/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+```
+
+## CORS Policy
+
+A global CORS configuration is applied to every route (`[/**]`). This ensures that browser-based clients running on any origin can make cross-origin requests to the gateway without being blocked by the browser's same-origin policy.
+
+| Setting | Value | Description |
+|---|---|---|
+| `allowedOrigins` | `*` | Accepts requests from any origin |
+| `allowedMethods` | `GET, POST, PUT, DELETE` | Standard CRUD HTTP verbs |
+| `allowedHeaders` | `*` | Allows all request headers, including `Authorization` and `Content-Type` |
+
+<Warning>
+  In production, `allowedOrigins: "*"` should be replaced with an explicit allowlist of known frontend domains (e.g., `https://app.innovatech.com`). A wildcard origin prevents browsers from sending cookies or `Authorization` headers with credentialed requests and exposes the API to cross-site request abuse.
+</Warning>
+
+## Health & Monitoring
+
+Spring Boot Actuator is configured to expose two management endpoints over HTTP. These can be called by load balancers, container orchestrators, or CI pipelines to verify service availability.
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/actuator/health` | `GET` | Returns `{"status":"UP"}` when the gateway is running normally |
+| `/actuator/info` | `GET` | Returns application metadata defined in `management.info.*` |
+
+Example health check:
+
+```bash
+curl http://localhost:8080/actuator/health
+# {"status":"UP"}
+```
+
+## Configuration Reference
+
+The following table lists every configuration property in `application.yml` along with its value and purpose.
+
+| Property | Value | Purpose |
+|---|---|---|
+| `server.port` | `8080` | Listening port for all inbound traffic |
+| `spring.application.name` | `api-gateway` | Service name used in logs and Actuator info |
+| `spring.cloud.gateway.globalcors.cors-configurations.[/**].allowedOrigins` | `*` | CORS: permitted request origins |
+| `spring.cloud.gateway.globalcors.cors-configurations.[/**].allowedMethods` | `GET, POST, PUT, DELETE` | CORS: permitted HTTP methods |
+| `spring.cloud.gateway.globalcors.cors-configurations.[/**].allowedHeaders` | `*` | CORS: permitted request headers |
+| `routes[0].id` | `ruta-catalogo` | Route identifier for catalog service |
+| `routes[0].uri` | `http://localhost:8084` | Catalog service upstream address |
+| `routes[0].predicates[0]` | `Path=/api/v1/catalogo/**` | Path predicate for catalog route |
+| `routes[1].id` | `ruta-orquestador-pos` | Route identifier for POS orchestrator |
+| `routes[1].uri` | `http://localhost:8082` | POS service upstream address |
+| `routes[1].predicates[0]` | `Path=/api/v1/ventas-pos/**` | Path predicate for POS route |
+| `routes[2].id` | `ruta-inventario` | Route identifier for inventory service |
+| `routes[2].uri` | `http://localhost:8081` | Inventory service upstream address |
+| `routes[2].predicates[0]` | `Path=/api/v1/inventario/**` | Path predicate for inventory route |
+| `management.endpoints.web.exposure.include` | `health, info` | Actuator endpoints exposed over HTTP |

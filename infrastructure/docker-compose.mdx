@@ -1,0 +1,146 @@
+---
+title: "Docker Compose: Local Infrastructure Bootstrap"
+sidebarTitle: "Docker Compose"
+description: "Use Docker Compose to start PostgreSQL 15 and MongoDB 6.0 for local InnovaTech SOA development — the required first step before launching any microservice."
+---
+
+Before you can run any InnovaTech SOA microservice locally, the shared infrastructure layer must be running. The project ships a `docker-compose.yml` at the repository root that provisions both database engines — PostgreSQL 15 for transactional services and MongoDB 6.0 for the product catalog — on an isolated bridge network. This is the **only** step that requires Docker; the microservices themselves run directly on the host via Maven.
+
+## Overview
+
+The Compose file defines two services, one custom bridge network, and two named volumes:
+
+| Resource | Type | Purpose |
+|----------|------|---------|
+| `postgres-db` | Service | Relational database for inventory, customers, and POS sales |
+| `mongo-db` | Service | Document database for the product catalog |
+| `soa-network` | Network (bridge) | Isolated network connecting both database containers |
+| `postgres_data` | Named volume | Persists PostgreSQL data across container restarts |
+| `mongo_data` | Named volume | Persists MongoDB data across container restarts |
+
+<Note>
+  Both containers join the `soa-network` bridge network. Although the microservices connect to the databases via `localhost` during local development, the shared network ensures that any future containerised service can reach the databases by container name without needing host-mode networking.
+</Note>
+
+## Services
+
+### `postgres-db` — PostgreSQL 15
+
+The relational database is used by `servicio-inventario` and is planned as the backing store for `servicio-clientes` and `servicio-ventapos`. It runs on the lightweight Alpine variant of the official PostgreSQL 15 image.
+
+| Property | Value |
+|----------|-------|
+| Image | `postgres:15-alpine` |
+| Container name | `innovatech-postgres` |
+| `POSTGRES_USER` | `innovatech` |
+| `POSTGRES_PASSWORD` | `secretpassword` |
+| `POSTGRES_DB` | `innovatech_db` |
+| Host port → Container port | `5433 → 5432` |
+| Named volume | `postgres_data:/var/lib/postgresql/data` |
+
+### `mongo-db` — MongoDB 6.0
+
+The document store backs the `servicio-catalogo` service and holds the product and pricing catalogue. The root admin credentials set here must match the URI used in `servicio-catalogo`'s `application.yml`.
+
+| Property | Value |
+|----------|-------|
+| Image | `mongo:6.0` |
+| Container name | `innovatech-mongo` |
+| `MONGO_INITDB_ROOT_USERNAME` | `admin` |
+| `MONGO_INITDB_ROOT_PASSWORD` | `secretpassword` |
+| Host port → Container port | `27017 → 27017` |
+| Named volume | `mongo_data:/data/db` |
+
+## Full `docker-compose.yml`
+
+The complete file as it appears in the repository root:
+
+```yaml
+version: '3.8'
+
+services:
+  # Base de Datos Relacional (PostgreSQL) para Clientes, Inventario y Ventas
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: innovatech-postgres
+    environment:
+      POSTGRES_USER: innovatech
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: innovatech_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - soa-network
+
+  # Base de Datos No Relacional (MongoDB) para el Catálogo Web (Requisito de Rúbrica)
+  mongo-db:
+    image: mongo:6.0
+    container_name: innovatech-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: secretpassword
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - soa-network
+
+networks:
+  soa-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongo_data:
+```
+
+## Commands
+
+Use the following commands from the **repository root** (where `docker-compose.yml` lives):
+
+<Steps>
+  <Step title="Start all infrastructure services in the background">
+    ```bash
+    docker-compose up -d
+    ```
+    Docker pulls the images on first run (requires an internet connection). Subsequent starts use the local cache.
+  </Step>
+  <Step title="Verify both containers are running">
+    ```bash
+    docker-compose ps
+    ```
+    Both `innovatech-postgres` and `innovatech-mongo` should show a `running` state before you start any microservice.
+  </Step>
+  <Step title="Stop containers (data is preserved)">
+    ```bash
+    docker-compose down
+    ```
+    Named volumes (`postgres_data`, `mongo_data`) are retained — your data survives the shutdown.
+  </Step>
+  <Step title="Stop containers and erase all data">
+    ```bash
+    docker-compose down -v
+    ```
+    The `-v` flag removes the named volumes as well. Use this to reset the environment to a clean slate.
+  </Step>
+</Steps>
+
+## Port Mappings
+
+| Service | Container Port | Host Port | Purpose |
+|---------|---------------|-----------|---------|
+| PostgreSQL | 5432 | 5433 | Relational DB (inventory, customers, POS) |
+| MongoDB | 27017 | 27017 | Document DB (product catalog) |
+
+<Warning>
+  PostgreSQL is deliberately mapped to **host port 5433** (not the default 5432) to avoid conflicts with any locally installed PostgreSQL instance. All microservices and client tools must therefore use port `5433` in their connection strings. For example, the JDBC URL used by `servicio-inventario` is:
+
+  ```
+  jdbc:postgresql://localhost:5433/innovatech_db
+  ```
+
+  Using port `5432` in a connection string will fail unless you have a separate local PostgreSQL server running.
+</Warning>

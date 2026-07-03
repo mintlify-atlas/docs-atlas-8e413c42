@@ -1,0 +1,215 @@
+---
+title: "Service Configuration Reference for InnovaTech SOA"
+sidebarTitle: "Configuration"
+description: "Complete configuration reference for all InnovaTech SOA microservices, including ports, database URLs, Eureka settings, and SpringDoc API documentation paths."
+---
+
+Every InnovaTech SOA microservice is a standalone Spring Boot application configured through an `application.yml` file in its `src/main/resources` directory. This page collects all service configurations in one place so you can verify port allocations, check connection strings, and understand how the gateway routing, service discovery, and database settings fit together before starting local development.
+
+## Port Allocation Summary
+
+Each microservice and infrastructure component occupies a fixed port. Ensure none of the following ports are already in use on your machine before launching the stack.
+
+| Service | Port | Protocol |
+|---------|------|----------|
+| `api-gateway` | 8080 | HTTP (reactive, non-blocking) |
+| `eureka-server` | 8761 | HTTP |
+| `servicio-inventario` | 8081 | HTTP |
+| `servicio-ventapos` | 8082 | HTTP |
+| `servicio-catalogo` | 8084 | HTTP |
+| PostgreSQL (host) | 5433 | TCP |
+| MongoDB | 27017 | TCP |
+
+## API Gateway Configuration
+
+The API Gateway (`api-gateway`) is built on **Spring Cloud Gateway** with a reactive, non-blocking engine (Spring WebFlux). It is the single entry point for all frontend traffic and is responsible for routing requests to the correct downstream service. It also handles global CORS policy so that browser clients do not need per-service CORS configuration.
+
+**Key configuration sections:**
+
+- **`server.port: 8080`** — all frontend requests target this port.
+- **`spring.cloud.gateway.globalcors`** — allows all origins, methods (GET, POST, PUT, DELETE), and headers. Suitable for development; restrict in production.
+- **`spring.cloud.gateway.routes`** — three static routes match path prefixes and forward to the appropriate service on `localhost`.
+- **`management.endpoints.web.exposure`** — exposes the `health` and `info` Actuator endpoints for monitoring.
+
+Full `api-gateway/src/main/resources/application.yml`:
+
+```yaml
+server:
+  port: 8080 # El Frontend siempre apuntara aqui
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+            allowedHeaders: "*"
+      routes:
+        # Ruta para el servicio de Luis
+        - id: ruta-catalogo
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/v1/catalogo/**
+
+        # Ruta para nuestro Orquestador
+        - id: ruta-orquestador-pos
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/ventas-pos/**
+
+        # Ruta para nuestro Inventario
+        - id: ruta-inventario
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/inventario/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+```
+
+**Gateway route summary:**
+
+| Route ID | Path Prefix | Forwarded To |
+|----------|-------------|--------------|
+| `ruta-catalogo` | `/api/v1/catalogo/**` | `http://localhost:8084` |
+| `ruta-orquestador-pos` | `/api/v1/ventas-pos/**` | `http://localhost:8082` |
+| `ruta-inventario` | `/api/v1/inventario/**` | `http://localhost:8081` |
+
+## Eureka Server Configuration
+
+The Eureka Server provides a service registry for the platform. In the current development setup it runs in standalone mode — it does not attempt to register itself with another Eureka instance (`register-with-eureka: false`) and does not fetch the registry from a peer (`fetch-registry: false`).
+
+Full `eureka-server/src/main/resources/application.yml`:
+
+```yaml
+server:
+  port: 8761
+
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+```
+
+The Eureka dashboard is accessible at [http://localhost:8761](http://localhost:8761) once the server is running. All client services that configure `eureka.client.service-url.defaultZone` will appear in this dashboard.
+
+## Inventory Service Configuration
+
+`servicio-inventario` manages the Kardex stock records with logical warehouse segregation between web and physical channels. It connects to PostgreSQL and registers with Eureka.
+
+Full `servicio-inventario/src/main/resources/application.yml`:
+
+```yaml
+server:
+  port: 8081
+
+spring:
+  application:
+    name: servicio-inventario
+  datasource:
+    url: jdbc:postgresql://localhost:5433/innovatech_db
+    username: innovatech
+    password: secretpassword
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+```
+
+**Notable settings:**
+- `show-sql: true` — all generated SQL statements are printed to the console. Useful for debugging; disable in production to reduce log noise.
+- `ddl-auto: update` — Hibernate automatically creates or alters tables to match the JPA entity model on startup.
+- `prefer-ip-address: true` — the service registers its IP address (rather than hostname) with Eureka, which is more reliable in Docker and containerised environments.
+
+## Catalog Service Configuration
+
+`servicio-catalogo` manages product and pricing data backed by MongoDB. It also exposes an interactive Swagger UI powered by SpringDoc OpenAPI, making the API directly testable from the browser.
+
+Full `servicio-catalogo/src/main/resources/application.yml`:
+
+```yaml
+server:
+  port: 8084
+
+spring:
+  application:
+    name: servicio-catalogo
+  data:
+    mongodb:
+      uri: mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin
+
+# Configuracion de Swagger para que Luis pueda probar su API localmente
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+```
+
+With `servicio-catalogo` running, the following URLs are available:
+
+| URL | Description |
+|-----|-------------|
+| `http://localhost:8084/swagger-ui.html` | Interactive Swagger UI |
+| `http://localhost:8084/api-docs` | Raw OpenAPI JSON specification |
+
+## Eureka Client Registration
+
+All client services (currently `servicio-inventario`; the pattern is repeated for `servicio-ventapos` and `servicio-clientes`) use a consistent block of Eureka client settings:
+
+```yaml
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+```
+
+- **`defaultZone`** points every client at the standalone Eureka server on port `8761`.
+- **`prefer-ip-address: true`** ensures the service registers its numeric IP address, which avoids hostname-resolution issues in mixed local/container environments.
+
+<Note>
+  All `application.yml` files follow the standard Spring Boot externalized configuration format. Any property can be overridden at runtime without modifying the file by setting a corresponding environment variable using Spring Boot's `SPRING_` prefix convention. For example, to override the datasource URL:
+
+  ```bash
+  export SPRING_DATASOURCE_URL=jdbc:postgresql://prod-host:5432/prod_db
+  mvn spring-boot:run
+  ```
+
+  Nested YAML keys are flattened with underscores and uppercased. This makes it straightforward to inject configuration in CI/CD pipelines or container orchestration platforms without rebuilding the application.
+</Note>
+
+<Warning>
+  The `application.yml` files in this repository contain **hardcoded plaintext credentials** (database passwords, MongoDB root password). This is acceptable for a local development workflow but is a security risk in any shared, staging, or production environment. Before deploying beyond a developer's local machine, migrate all secrets to one of the following approaches:
+
+  - **Environment variables** — override via `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATA_MONGODB_URI`, etc.
+  - **Spring Cloud Config Server** — centralise configuration and serve it at runtime, keeping secrets out of source control.
+  - **A secrets manager** — such as HashiCorp Vault or AWS Secrets Manager, integrated via Spring Cloud Vault or environment injection.
+
+  Never commit production credentials to version control.
+</Warning>

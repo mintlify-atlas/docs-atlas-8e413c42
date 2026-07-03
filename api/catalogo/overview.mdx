@@ -1,0 +1,74 @@
+---
+title: "Catalog Service API: MongoDB Product Management"
+sidebarTitle: "Catalog API"
+description: "The Catalog Service API manages product and pricing data stored in MongoDB, accessible via the API Gateway at /api/v1/catalogo/**. Explore endpoints via Swagger UI."
+---
+
+The Catalog Service (`servicio-catalogo`) is the authoritative source of product data in InnovaTech SOA. It stores and manages product definitions — including names, descriptions, prices, and categories — in a MongoDB database, making it well-suited for the flexible, document-oriented nature of product catalogs where attributes vary between product types. All catalog endpoints are accessible to clients through the API Gateway at the `/api/v1/catalogo/**` namespace, and the service also generates a fully interactive Swagger UI for local development and testing.
+
+## Base Path
+
+Access the Catalog API through the gateway during normal operation:
+
+```
+http://localhost:8080/api/v1/catalogo/**
+```
+
+If you need to reach the service directly — for local development, debugging, or browsing Swagger UI — it listens on its own port:
+
+```
+http://localhost:8084
+```
+
+## Interactive Documentation
+
+The catalog service uses **SpringDoc OpenAPI 2.3.0** to generate API documentation automatically from its controller annotations. No manual specification maintenance is required — the docs always reflect the live codebase.
+
+| Resource | URL |
+|---|---|
+| Swagger UI (browser) | http://localhost:8084/swagger-ui.html |
+| OpenAPI JSON spec | http://localhost:8084/api-docs |
+
+Open the Swagger UI in your browser to view every available endpoint, inspect request/response schemas, and execute test requests directly against the running service.
+
+<Tip>
+  Download the raw OpenAPI specification from `http://localhost:8084/api-docs` to import into **Postman** as a collection, or feed it into OpenAPI code generators (such as `openapi-generator-cli`) to automatically produce typed client SDKs for TypeScript, Python, or any other supported language.
+</Tip>
+
+## Data Store
+
+The catalog service connects to **MongoDB** using the database `innovatech_catalogo`. Product documents are schema-flexible by design, but typical fields include:
+
+| Field | Description |
+|---|---|
+| `nombre` | Product display name |
+| `descripcion` | Full product description |
+| `precio` | Unit price |
+| `categoria` | Product category or classification |
+
+The MongoDB URI is configured in the service's `application.yml`:
+
+```yaml
+spring:
+  data:
+    mongodb:
+      uri: mongodb://admin:secretpassword@localhost:27017/innovatech_catalogo?authSource=admin
+```
+
+<Note>
+  The MongoDB instance used by this service is started via `docker-compose` from the project root. Ensure the container is running before starting the catalog service, or connections will be refused on startup.
+</Note>
+
+## Running the Service
+
+Start the catalog service locally from the project root:
+
+```bash
+cd servicio-catalogo && mvn spring-boot:run
+```
+
+The service will start on port `8084`. Once running, the Swagger UI at `http://localhost:8084/swagger-ui.html` becomes available immediately and lists all endpoints with their current request/response contracts.
+
+<Note>
+  The full list of catalog endpoints — product creation, retrieval, update, and deletion — is available exclusively through the Swagger UI at `http://localhost:8084/swagger-ui.html`. The catalog service is maintained by the catalog team and its endpoint contracts are auto-documented directly from source code, ensuring the Swagger UI is always up to date.
+</Note>

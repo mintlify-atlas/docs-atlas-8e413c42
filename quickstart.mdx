@@ -1,47 +1,214 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with InnovaTech SOA Locally"
+sidebarTitle: "Quickstart"
+description: "Set up InnovaTech SOA on your local machine using Docker Compose and Maven in under 10 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through running the complete InnovaTech SOA platform on your local development machine. By the end you will have both databases running in Docker, all five Spring Boot services registered with Eureka, and at least one React frontend serving traffic — all communicating through the API Gateway on port `8080`.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure the following tools are installed and available on your `PATH`:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Docker and Docker Compose** — used to run PostgreSQL 15 and MongoDB 6.0 containers. Any recent Docker Desktop release works.
+- **Java 17 JDK** — all Spring Boot services require Java 17. Verify with `java -version`.
+- **Apache Maven** — used to build and run each Spring Boot service. Verify with `mvn -version`.
+- **Node.js 18+** — required only if you intend to run one of the React frontends (`frontend-web` or `frontend-pos`). Verify with `node -version`.
 
-## Get started
+<Warning>
+  PostgreSQL is mapped to host port **5433**, not the default 5432. This avoids conflicts with any local PostgreSQL installation you may already have running. All service `application.yml` files are already configured to connect on `5433` — do not change the Docker Compose port mapping without also updating the datasource URLs.
+</Warning>
+
+---
+
+## Setup Steps
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the Repository">
+    Clone the InnovaTech SOA monorepo to your local machine:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/Nelsoncg98/InnovaTech.git
+    cd InnovaTech
     ```
+
+    The repository root contains the `docker-compose.yml` manifest and one directory per service or frontend.
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Start Infrastructure Databases">
+    From the repository root, launch PostgreSQL and MongoDB as background Docker containers:
 
     ```bash
-    your-cli init
+    docker-compose up -d
     ```
+
+    Docker Compose starts two containers using the following configuration:
+
+    ```yaml
+    services:
+      postgres-db:
+        image: postgres:15-alpine
+        container_name: innovatech-postgres
+        environment:
+          POSTGRES_USER: innovatech
+          POSTGRES_PASSWORD: secretpassword
+          POSTGRES_DB: innovatech_db
+        ports:
+          - "5433:5432"   # host:container
+
+      mongo-db:
+        image: mongo:6.0
+        container_name: innovatech-mongo
+        environment:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: secretpassword
+        ports:
+          - "27017:27017"
+    ```
+
+    Confirm both containers are healthy before proceeding:
+
+    ```bash
+    docker ps
+    ```
+
+    You should see `innovatech-postgres` listening on `0.0.0.0:5433` and `innovatech-mongo` on `0.0.0.0:27017`.
+
+    <Warning>
+      The host-side PostgreSQL port is **5433**, not 5432. If you attempt to connect to port 5432 from a service or client, the connection will be refused. The `servicio-inventario` datasource URL is already set to `jdbc:postgresql://localhost:5433/innovatech_db`.
+    </Warning>
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Start Eureka Server">
+    Eureka must be the first Spring Boot service to start. All other services register with it on boot, so it must be reachable before they launch.
 
     ```bash
-    your-cli start
+    cd eureka-server
+    mvn spring-boot:run
     ```
+
+    Eureka starts on port **8761**. Once you see the log line `Started EurekaServerApplication`, open the dashboard to confirm the server is up:
+
+    ```
+    http://localhost:8761
+    ```
+
+    The dashboard will initially show zero registered instances — that is expected at this stage.
+  </Step>
+
+  <Step title="Start API Gateway">
+    Open a new terminal, navigate to the `api-gateway` directory, and start the gateway:
+
+    ```bash
+    cd api-gateway
+    mvn spring-boot:run
+    ```
+
+    The gateway starts on port **8080** and registers the following three route predicates into Spring Cloud Gateway:
+
+    | Route ID | Path Prefix | Upstream |
+    |---|---|---|
+    | `ruta-catalogo` | `/api/v1/catalogo/**` | `http://localhost:8084` |
+    | `ruta-orquestador-pos` | `/api/v1/ventas-pos/**` | `http://localhost:8082` |
+    | `ruta-inventario` | `/api/v1/inventario/**` | `http://localhost:8081` |
+
+    All frontends send every request to `http://localhost:8080` — the gateway resolves the correct upstream automatically.
+  </Step>
+
+  <Step title="Start Domain Services">
+    Each of the three domain services must be started in its own terminal. The order within this step does not matter as long as Eureka is already running.
+
+    **servicio-catalogo** — Product catalog backed by MongoDB, runs on port **8084**:
+
+    ```bash
+    cd servicio-catalogo
+    mvn spring-boot:run
+    ```
+
+    **servicio-inventario** — Inventory Kardex backed by PostgreSQL, runs on port **8081**:
+
+    ```bash
+    cd servicio-inventario
+    mvn spring-boot:run
+    ```
+
+    **servicio-ventapos** — POS sales orchestrator backed by PostgreSQL, runs on port **8082**:
+
+    ```bash
+    cd servicio-ventapos
+    mvn spring-boot:run
+    ```
+
+    After each service starts, refresh the Eureka dashboard at `http://localhost:8761`. You should see `SERVICIO-CATALOGO`, `SERVICIO-INVENTARIO`, and `SERVICIO-VENTAPOS` appear in the **Instances currently registered with Eureka** table.
+
+    <Note>
+      Each domain service connects to its database immediately on startup. If PostgreSQL or MongoDB is not yet healthy, the service will fail to start. Always ensure `docker-compose up -d` completes successfully before starting any Spring Boot service.
+    </Note>
+  </Step>
+
+  <Step title="Start a Frontend">
+    Choose the frontend that matches your workflow. Both share the same `package.json` script structure.
+
+    **Web Storefront** (`frontend-web`) — the React 19 e-commerce channel:
+
+    ```bash
+    cd frontend-web
+    npm install
+    npm run dev
+    ```
+
+    **POS Application** (`frontend-pos`) — the React 19 point-of-sale channel for physical stores:
+
+    ```bash
+    cd frontend-pos
+    npm install
+    npm run dev
+    ```
+
+    Vite starts the dev server and prints a local URL (typically `http://localhost:5173`). Both frontends proxy all API calls through the gateway at `http://localhost:8080`.
+
+    <Note>
+      You can run both frontends at the same time in separate terminals. Vite will assign `frontend-pos` to the next available port (typically `http://localhost:5174`) if `5173` is already taken.
+    </Note>
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+---
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+## Verify Installation
+
+Once all services are running, use the following URLs to confirm each component is healthy:
+
+| Component | URL | What to Check |
+|---|---|---|
+| Eureka Dashboard | `http://localhost:8761` | All three domain services listed as `UP` |
+| API Gateway health | `http://localhost:8080/actuator/health` | `{"status":"UP"}` |
+| Catalog Swagger UI | `http://localhost:8084/swagger-ui.html` | Interactive API docs for `servicio-catalogo` |
+| Inventory Swagger UI | `http://localhost:8081/swagger-ui.html` | Interactive API docs for `servicio-inventario` |
+| POS Swagger UI | `http://localhost:8082/swagger-ui.html` | Interactive API docs for `servicio-ventapos` |
+
+### Sample API Call — Inventory Stock Check
+
+The following `curl` command queries the inventory service for the current stock level of a product, routed through the API Gateway:
+
+```bash
+curl http://localhost:8080/api/v1/inventario/{productoId}/stock
+```
+
+Replace `{productoId}` with a valid product identifier from your catalog. The gateway forwards the request to `servicio-inventario` on port `8081` and returns the stock JSON response directly to the caller.
+
+---
+
+## Startup Order Reference
+
+<Note>
+  Always follow this startup sequence to avoid registration and connection errors:
+
+  1. **Databases first** — `docker-compose up -d` (PostgreSQL on `5433`, MongoDB on `27017`)
+  2. **Eureka Server** — port `8761` must be reachable before any other Spring Boot service starts
+  3. **API Gateway** — port `8080`; registers routes but does not connect to a database
+  4. **Domain services** — `servicio-catalogo` (8084), `servicio-inventario` (8081), `servicio-ventapos` (8082) in any order
+  5. **Frontends** — `frontend-web` and/or `frontend-pos` after all backend services are up
+
+  Starting a domain service before Eureka is available will not cause a fatal crash, but the service will log repeated retry warnings and will not appear in the dashboard until Eureka becomes reachable.
+</Note>

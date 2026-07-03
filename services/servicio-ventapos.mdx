@@ -1,0 +1,97 @@
+---
+title: "POS Sales Service: SAGA Orchestration for Physical Sales"
+sidebarTitle: "POS Sales Service"
+description: "The servicio-ventapos orchestrates physical point-of-sale transactions, coordinating inventory, customers, and payment using the SAGA pattern for reliable rollback."
+---
+
+The POS Sales Service is the transaction director for InnovaTech's physical store channel. When a cashier processes a sale at a point-of-sale terminal, every step of that transaction — validating the customer, checking and reserving inventory, processing payment, and recording the completed sale — flows through this service. Rather than letting those steps happen independently, `servicio-ventapos` orchestrates them in a defined sequence and, critically, is responsible for issuing compensating rollback calls if any step fails partway through.
+
+## Overview
+
+`servicio-ventapos` is a **Task Service / BFF (Backend for Frontend)** in the SOA topology, meaning it does not own a domain data store of its own. Its role is purely orchestration: receiving a sale request, calling the appropriate entity services in order, and resolving the transaction to either a confirmed sale or a fully compensated rollback. It runs on **port 8082** and registers with the Eureka Server for service discovery. The service is built on **Spring Boot 3.1.2** with both `spring-boot-starter-web` (blocking MVC) and `spring-boot-starter-webflux` (reactive WebClient) on the classpath, allowing it to make non-blocking outbound calls to downstream services via `WebClient` while still exposing a conventional MVC REST API to its callers.
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="plug">
+    **8082** — all POS transaction requests target this port via the gateway
+  </Card>
+  <Card title="Type" icon="sitemap">
+    Task Service / BFF — orchestration only, no domain data store
+  </Card>
+  <Card title="Spring Boot" icon="leaf">
+    **3.1.2** / Spring Cloud **2022.0.4**
+  </Card>
+  <Card title="Pattern" icon="arrows-rotate">
+    SAGA (choreography-free, orchestrator-driven) with logical rollback
+  </Card>
+</CardGroup>
+
+## SAGA Pattern Implementation
+
+The SAGA pattern addresses a fundamental problem in distributed systems: how to maintain consistency across multiple services when there is no shared database transaction. In `servicio-ventapos`, every physical sale is modeled as a SAGA — a sequence of local transactions, each performed by a separate service, where each step has a defined **compensating transaction** that undoes its effect if a later step fails.
+
+This implementation is **orchestrator-driven**: `servicio-ventapos` is the single coordinator that knows the full sequence and is responsible for calling both the forward steps and the compensating steps. There is no message broker or event bus — all coordination happens through synchronous HTTP calls managed by the orchestrator.
+
+<Info>
+  Because the platform has no distributed transaction manager (no XA/2PC), consistency is achieved through **logical rollback**. If a sale fails after inventory has already been decremented, `servicio-ventapos` issues a compensating HTTP call to restore the stock. This means the system is **eventually consistent** rather than strictly ACID-consistent — a brief window exists between a forward step succeeding and its potential compensation where the state is intermediate.
+</Info>
+
+## Transaction Flow
+
+A complete POS sale transaction proceeds through the following steps. If any step returns an error, all previously completed steps are reversed through their compensating calls.
+
+<Steps>
+  <Step title="Validate Customer">
+    Call `servicio-clientes` to confirm that the customer exists and is eligible to make a purchase (e.g., account is active, no outstanding blocks). If validation fails, the transaction is rejected immediately with no state changes to undo.
+  </Step>
+  <Step title="Check and Decrement Inventory">
+    Call `servicio-inventario` at `POST /api/inventario/{productoId}/descontar?cantidad={n}` for each product in the sale. The inventory service atomically checks that sufficient stock exists and decrements it. If any product returns `400 Stock insuficiente`, the orchestrator triggers compensation for any items already decremented in this step and aborts.
+  </Step>
+  <Step title="Process Payment">
+    Submit the total sale amount to the payment gateway. If payment is declined or the gateway returns an error, the orchestrator issues compensating inventory restoration calls (`POST /api/inventario/{productoId}/descontar` with a negative quantity, or a dedicated restore endpoint) to undo the stock decrements from Step 2, then returns a failure response to the POS terminal.
+  </Step>
+  <Step title="Confirm Sale">
+    Once payment is successful, record the completed sale (line items, customer, timestamp, payment reference) in the service's own data store or forward the confirmation event to a downstream reporting service. Return a success response to the POS terminal with the sale receipt details.
+  </Step>
+</Steps>
+
+If a failure occurs at **Step 2** or **Step 3**, `servicio-ventapos` executes compensating transactions in reverse order (Step 2 compensation before Step 1 compensation) to restore the system to its pre-sale state.
+
+## Gateway Path
+
+All POS transaction requests from frontend clients must be routed through the API Gateway. The gateway's `ruta-orquestador-pos` route maps the external path prefix to this service.
+
+| Context | Base Path |
+|---|---|
+| Via API Gateway (external) | `http://localhost:8080/api/v1/ventas-pos/**` |
+| Direct to service (internal) | `http://localhost:8082/api/v1/ventas-pos/**` |
+
+Example sale request through the gateway:
+
+```bash
+POST http://localhost:8080/api/v1/ventas-pos/procesar
+Content-Type: application/json
+
+{
+  "clienteId": "CLI-001",
+  "items": [
+    { "productoId": "PROD-42", "cantidad": 2 },
+    { "productoId": "PROD-17", "cantidad": 1 }
+  ],
+  "metodoPago": "TARJETA"
+}
+```
+
+## Integration Points
+
+`servicio-ventapos` integrates with three external systems during a transaction. All calls are outbound HTTP — the POS service acts as client, not server, in these interactions.
+
+| Downstream Service | Call | Purpose |
+|---|---|---|
+| `servicio-inventario` | `GET /api/inventario/{productoId}/stock` | Pre-check stock availability before attempting decrement |
+| `servicio-inventario` | `POST /api/inventario/{productoId}/descontar?cantidad={n}` | Atomically decrement stock as part of the sale commit |
+| `servicio-clientes` | Customer validation endpoint | Confirm customer identity and account status |
+| Payment Gateway | Payment processing endpoint | Authorize and capture the sale amount |
+
+<Note>
+  `servicio-ventapos` is the **only orchestrator** in the InnovaTech system. Domain services (`servicio-catalogo`, `servicio-inventario`, `servicio-clientes`) are designed to be called by orchestrators — they do not call each other directly. All cross-domain coordination for POS transactions flows exclusively through this service, which enforces a clean separation between domain logic and transaction orchestration and makes the full transaction flow inspectable in a single place.
+</Note>

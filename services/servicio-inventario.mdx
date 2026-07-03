@@ -1,0 +1,233 @@
+---
+title: "Inventory Service: Stock Control with PostgreSQL"
+sidebarTitle: "Inventory Service"
+description: "The Inventory Service (servicio-inventario) manages product stock levels using PostgreSQL, exposing two REST endpoints for querying and decrementing stock."
+---
+
+The Inventory Service is the authoritative source of stock data for the InnovaTech platform. It maintains a record of available stock for every product and exposes two focused endpoints: one to query current stock levels and one to atomically decrement stock when a sale is confirmed. It is designed to be called by orchestration services — primarily `servicio-ventapos` — not by frontend clients directly.
+
+## Overview
+
+`servicio-inventario` is a **domain entity service** backed by **PostgreSQL**, running on **port 8081**. It uses **Spring Data JPA** with Hibernate for ORM-based persistence and registers itself with the **Eureka Server** for service discovery. The service is built on **Spring Boot 3.1.2** with **Spring Cloud 2022.0.4** and uses Lombok to reduce boilerplate in the data model and service layer.
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="plug">
+    **8081** — direct service address
+  </Card>
+  <Card title="Database" icon="database">
+    PostgreSQL — `innovatech_db` on port **5433**
+  </Card>
+  <Card title="Spring Boot" icon="leaf">
+    **3.1.2** / Spring Cloud **2022.0.4**
+  </Card>
+  <Card title="Service Discovery" icon="magnifying-glass">
+    Registered with Eureka at `http://localhost:8761/eureka/`
+  </Card>
+</CardGroup>
+
+## Configuration
+
+The service connects to PostgreSQL using Spring Data JPA with Hibernate's `update` DDL mode, which automatically creates or alters the `inventario` table to match the entity model on startup. SQL logging is enabled to aid development-time debugging.
+
+```yaml
+server:
+  port: 8081
+
+spring:
+  application:
+    name: servicio-inventario
+  datasource:
+    url: jdbc:postgresql://localhost:5433/innovatech_db
+    username: innovatech
+    password: secretpassword
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+```
+
+| Property | Value | Description |
+|---|---|---|
+| `server.port` | `8081` | Port the service listens on |
+| `spring.datasource.url` | `jdbc:postgresql://localhost:5433/innovatech_db` | PostgreSQL connection URL (note: port **5433**, not the default 5432) |
+| `spring.datasource.username` | `innovatech` | Database user |
+| `spring.jpa.hibernate.ddl-auto` | `update` | Hibernate auto-creates or updates the schema on startup |
+| `spring.jpa.show-sql` | `true` | Logs every SQL statement to stdout |
+| `spring.jpa.database-platform` | `org.hibernate.dialect.PostgreSQLDialect` | Tells Hibernate to generate PostgreSQL-compatible SQL |
+| `eureka.client.service-url.defaultZone` | `http://localhost:8761/eureka/` | Eureka server registration endpoint |
+| `eureka.instance.prefer-ip-address` | `true` | Registers by IP address for reliable container networking |
+
+## Data Model
+
+The service persists a single entity, `Inventario`, in the `inventario` table. Each row represents the stock state for one product, identified by a string `productoId` (matching the product identifiers used in `servicio-catalogo`).
+
+| Field | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `Long` | Primary key, auto-generated | Internal row identifier |
+| `productoId` | `String` | `NOT NULL`, `UNIQUE` | Foreign product identifier — links to the catalog |
+| `stockDisponible` | `Integer` | `NOT NULL` | Current units available for sale |
+
+```java
+package com.innovatech.inventario.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+
+@Entity
+@Table(name = "inventario")
+@Data
+public class Inventario {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String productoId;
+
+    @Column(nullable = false)
+    private Integer stockDisponible;
+}
+```
+
+## REST Endpoints
+
+The controller exposes two endpoints under the base path `/api/inventario`. Both are intended for machine-to-machine calls from `servicio-ventapos` or other orchestrators.
+
+```java
+package com.innovatech.inventario.controller;
+
+import com.innovatech.inventario.service.InventarioService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/inventario")
+@RequiredArgsConstructor
+public class InventarioController {
+
+    private final InventarioService inventarioService;
+
+    @GetMapping("/{productoId}/stock")
+    public ResponseEntity<Integer> consultarStock(@PathVariable String productoId) {
+        return ResponseEntity.ok(inventarioService.getStock(productoId));
+    }
+
+    @PostMapping("/{productoId}/descontar")
+    public ResponseEntity<String> descontarStock(
+            @PathVariable String productoId,
+            @RequestParam Integer cantidad) {
+
+        boolean exito = inventarioService.descontarStock(productoId, cantidad);
+        if (exito) {
+            return ResponseEntity.ok("Stock descontado exitosamente");
+        } else {
+            return ResponseEntity.badRequest().body("Stock insuficiente o producto no encontrado");
+        }
+    }
+}
+```
+
+### `GET /api/inventario/{productoId}/stock`
+
+Returns the current available stock for a product as a plain integer.
+
+| Parameter | Type | Location | Description |
+|---|---|---|---|
+| `productoId` | `String` | Path | The product identifier to look up |
+
+**Responses:**
+
+| Status | Body | Condition |
+|---|---|---|
+| `200 OK` | `Integer` (e.g., `42`) | Product found; returns current `stockDisponible` |
+| `200 OK` | `0` | Product not found in inventory — returns zero by default |
+
+### `POST /api/inventario/{productoId}/descontar?cantidad={n}`
+
+Atomically decrements the stock for a product by the specified quantity. Only succeeds if sufficient stock exists.
+
+| Parameter | Type | Location | Description |
+|---|---|---|---|
+| `productoId` | `String` | Path | The product whose stock will be decremented |
+| `cantidad` | `Integer` | Query param | Number of units to deduct |
+
+**Responses:**
+
+| Status | Body | Condition |
+|---|---|---|
+| `200 OK` | `"Stock descontado exitosamente"` | Stock was sufficient; decrement committed |
+| `400 Bad Request` | `"Stock insuficiente o producto no encontrado"` | Stock was insufficient or product does not exist |
+
+## Business Logic
+
+The stock decrement is wrapped in a `@Transactional` method in the service layer. This ensures that the read-check and write form a single atomic database operation — no two concurrent requests can simultaneously read an available stock count and both succeed with a decrement that would together exceed available stock.
+
+```java
+package com.innovatech.inventario.service;
+
+import com.innovatech.inventario.model.Inventario;
+import com.innovatech.inventario.repository.InventarioRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class InventarioService {
+
+    private final InventarioRepository inventarioRepository;
+
+    public Integer getStock(String productoId) {
+        return inventarioRepository.findByProductoId(productoId)
+                .map(Inventario::getStockDisponible)
+                .orElse(0);
+    }
+
+    @Transactional
+    public boolean descontarStock(String productoId, Integer cantidad) {
+        Inventario inventario = inventarioRepository.findByProductoId(productoId)
+                .orElseThrow(() -> new RuntimeException("Producto no encontrado en inventario"));
+
+        if (inventario.getStockDisponible() >= cantidad) {
+            inventario.setStockDisponible(inventario.getStockDisponible() - cantidad);
+            inventarioRepository.save(inventario);
+            return true;
+        }
+        return false;
+    }
+}
+```
+
+The guard condition `inventario.getStockDisponible() >= cantidad` prevents overselling: if the requested quantity exceeds available stock, the method returns `false` without modifying the database, and the controller translates that into a `400 Bad Request` response.
+
+## Gateway Path
+
+<Warning>
+  There is a path difference between the **external** API Gateway route and the **internal** service path. When calling through the gateway, use `/api/v1/inventario/**`. The gateway forwards the full path as-is to the service on port 8081, where the controller is mapped to `/api/inventario/**` — without the `v1` segment. Ensure that gateway-routed requests do not include path segments that the service's controller does not expect, or configure a `RewritePath` filter in the gateway route if paths need to be transformed.
+</Warning>
+
+| Context | Base Path |
+|---|---|
+| Via API Gateway (external) | `http://localhost:8080/api/v1/inventario/` |
+| Direct to service (internal) | `http://localhost:8081/api/inventario/` |
+
+For example, a stock query through the gateway:
+
+```bash
+# Via API Gateway
+GET http://localhost:8080/api/v1/inventario/{productoId}/stock
+
+# Direct to service (dev/testing only)
+GET http://localhost:8081/api/inventario/{productoId}/stock
+```

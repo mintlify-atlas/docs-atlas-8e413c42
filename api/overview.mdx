@@ -1,0 +1,84 @@
+---
+title: "InnovaTech SOA REST API Overview"
+sidebarTitle: "Overview"
+description: "All InnovaTech SOA REST APIs are exposed through a centralized Spring Cloud Gateway on port 8080. Learn the base URL, routing structure, and available service namespaces."
+---
+
+InnovaTech SOA is an omnichannel e-commerce platform built on Service-Oriented Architecture principles. Every REST endpoint in the system — whether it belongs to the catalog, inventory, or POS sales orchestrator — is exposed to clients through a single, centralized **Spring Cloud Gateway** running on port `8080`. This means frontend applications, mobile clients, and integration partners never communicate with individual microservices directly; they always talk to the gateway, which handles routing, CORS enforcement, and request forwarding transparently.
+
+## Base URL
+
+All requests during local development are made against:
+
+```
+http://localhost:8080
+```
+
+In production or staging environments, this hostname is replaced with the appropriate domain or load-balancer address while the path structure remains identical.
+
+## API Namespaces
+
+The gateway defines three route namespaces, each forwarded to a dedicated microservice. The table below shows the public gateway path prefix, the internal service it routes to, and the direct port that service listens on.
+
+| Namespace | Routes To | Internal Port |
+|---|---|---|
+| `/api/v1/inventario/**` | servicio-inventario | 8081 |
+| `/api/v1/catalogo/**` | servicio-catalogo | 8084 |
+| `/api/v1/ventas-pos/**` | servicio-ventapos | 8082 |
+
+<CardGroup cols={3}>
+  <Card title="Inventory API" icon="boxes-stacked" href="/api/inventario/get-stock">
+    Query and decrement product stock counts. Backed by PostgreSQL with JPA. Consumed internally by the POS Sales Orchestrator.
+  </Card>
+  <Card title="Catalog API" icon="tag" href="/api/catalogo/overview">
+    Manage product definitions, descriptions, pricing, and categories. Backed by MongoDB. Full Swagger UI available.
+  </Card>
+  <Card title="POS Sales API" icon="cash-register" href="/api/ventas-pos/overview">
+    Orchestrate in-store sale transactions using the SAGA pattern across inventory, customers, and payment services.
+  </Card>
+</CardGroup>
+
+<Note>
+  Every path exposed through the gateway carries the `/api/v1/` prefix. The internal microservices themselves may use a shorter base path (for example, `servicio-inventario` maps its controller to `/api/inventario`). The gateway transparently forwards requests so callers always use the versioned `/api/v1/` form.
+</Note>
+
+## CORS Policy
+
+A global CORS policy is applied at the gateway level to all routes (`/**`), so individual microservices do not need their own CORS configuration. The policy permits:
+
+| Setting | Value |
+|---|---|
+| Allowed Origins | `*` (all origins) |
+| Allowed Methods | `GET`, `POST`, `PUT`, `DELETE` |
+| Allowed Headers | `*` (all headers) |
+
+Because CORS headers are added by the gateway before the response reaches the browser, you do not need to configure CORS in your Axios, Fetch, or other HTTP client beyond sending standard requests.
+
+## Health Check
+
+The gateway exposes Spring Boot Actuator management endpoints. Use the health endpoint to verify the gateway is running and reachable:
+
+```bash
+GET http://localhost:8080/actuator/health
+```
+
+**Response:**
+
+```json
+{"status": "UP"}
+```
+
+The `info` endpoint is also exposed at `http://localhost:8080/actuator/info`.
+
+## Interactive API Docs
+
+Each microservice generates its own interactive Swagger UI automatically via SpringDoc OpenAPI. You can explore and test endpoints directly in the browser at the service's native port — no authentication required during local development.
+
+| Service | Swagger UI URL | OpenAPI JSON |
+|---|---|---|
+| servicio-catalogo | http://localhost:8084/swagger-ui.html | http://localhost:8084/api-docs |
+| servicio-inventario | http://localhost:8081/swagger-ui.html | — |
+
+<Note>
+  Swagger UI is available on the service's direct port, not through the gateway. This is intentional — the Swagger UI URLs are development tools and are not routed through port 8080.
+</Note>
