@@ -1,5 +1,5 @@
 ---
-title: "Inventory Service: Stock Control with PostgreSQL"
+title: "Inventory Service: Stock Control and JPA with PostgreSQL"
 sidebarTitle: "Inventory Service"
 description: "The Inventory Service (servicio-inventario) manages product stock levels using PostgreSQL, exposing two REST endpoints for querying and decrementing stock."
 ---
@@ -151,7 +151,7 @@ Returns the current available stock for a product as a plain integer.
 | Status | Body | Condition |
 |---|---|---|
 | `200 OK` | `Integer` (e.g., `42`) | Product found; returns current `stockDisponible` |
-| `200 OK` | `0` | Product not found in inventory — returns zero by default |
+| `200 OK` | `0` | Product not in inventory — `orElse(0)` returns zero when no record exists |
 
 ### `POST /api/inventario/{productoId}/descontar?cantidad={n}`
 
@@ -167,7 +167,7 @@ Atomically decrements the stock for a product by the specified quantity. Only su
 | Status | Body | Condition |
 |---|---|---|
 | `200 OK` | `"Stock descontado exitosamente"` | Stock was sufficient; decrement committed |
-| `400 Bad Request` | `"Stock insuficiente o producto no encontrado"` | Stock was insufficient or product does not exist |
+| `400 Bad Request` | `"Stock insuficiente o producto no encontrado"` | Stock was insufficient (product found but quantity unavailable) |
 
 ## Business Logic
 

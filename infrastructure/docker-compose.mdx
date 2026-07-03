@@ -1,7 +1,7 @@
 ---
 title: "Docker Compose: Local Infrastructure Bootstrap"
 sidebarTitle: "Docker Compose"
-description: "Use Docker Compose to start PostgreSQL 15 and MongoDB 6.0 for local InnovaTech SOA development — the required first step before launching any microservice."
+description: "Start PostgreSQL 15 and MongoDB 6.0 for local InnovaTech SOA development with Docker Compose — the required first step before launching any microservice."
 ---
 
 Before you can run any InnovaTech SOA microservice locally, the shared infrastructure layer must be running. The project ships a `docker-compose.yml` at the repository root that provisions both database engines — PostgreSQL 15 for transactional services and MongoDB 6.0 for the product catalog — on an isolated bridge network. This is the **only** step that requires Docker; the microservices themselves run directly on the host via Maven.

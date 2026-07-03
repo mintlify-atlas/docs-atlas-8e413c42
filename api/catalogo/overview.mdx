@@ -1,7 +1,7 @@
 ---
-title: "Catalog Service API: MongoDB Product Management"
+title: "Catalog Service API: MongoDB-Backed Product Catalog"
 sidebarTitle: "Catalog API"
-description: "The Catalog Service API manages product and pricing data stored in MongoDB, accessible via the API Gateway at /api/v1/catalogo/**. Explore endpoints via Swagger UI."
+description: "Catalog Service manages MongoDB product data at /api/v1/catalogo/**. All routes are auto-documented — browse them via Swagger UI on port 8084."
 ---
 
 The Catalog Service (`servicio-catalogo`) is the authoritative source of product data in InnovaTech SOA. It stores and manages product definitions — including names, descriptions, prices, and categories — in a MongoDB database, making it well-suited for the flexible, document-oriented nature of product catalogs where attributes vary between product types. All catalog endpoints are accessible to clients through the API Gateway at the `/api/v1/catalogo/**` namespace, and the service also generates a fully interactive Swagger UI for local development and testing.

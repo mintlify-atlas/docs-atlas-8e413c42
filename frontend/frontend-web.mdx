@@ -1,7 +1,7 @@
 ---
 title: "Web Storefront: React Frontend for Digital Channel"
 sidebarTitle: "Web Storefront"
-description: "The frontend-web app is a React 19 + Vite single-page application serving the digital e-commerce channel, connecting to InnovaTech SOA through the API Gateway."
+description: "React 19 + Vite SPA serving the digital e-commerce channel, connecting to all InnovaTech SOA microservices through the API Gateway on port 8080."
 ---
 
 The `frontend-web` application is the digital channel frontend for InnovaTech SOA. It is one of two independent React single-page applications in the platform — the other being `frontend-pos` for physical store terminals. This app delivers the customer-facing web storefront and communicates exclusively with backend microservices through the API Gateway running on port `8080`.
@@ -12,13 +12,13 @@ The `frontend-web` application is the digital channel frontend for InnovaTech SO
 
 | Technology | Version | Role |
 |---|---|---|
-| React | 19.2 | UI component library |
-| React DOM | 19.2 | DOM rendering |
-| Vite | 8.1 | Dev server and build tool |
+| React | 19.2.7 | UI component library |
+| React DOM | 19.2.7 | DOM rendering |
+| Vite | 8.1.0 | Dev server and build tool |
 | @vitejs/plugin-react | 6.0.2 | Babel-based Fast Refresh |
 | oxlint | 1.69.0 | Fast Rust-based linter |
-| @types/react | 19.2 | TypeScript type definitions |
-| @types/react-dom | 19.2 | TypeScript type definitions for DOM |
+| @types/react | 19.2.17 | TypeScript type definitions |
+| @types/react-dom | 19.2.3 | TypeScript type definitions for DOM |
 
 The project uses ES Modules (`"type": "module"`) and ships TypeScript type definitions in `devDependencies`, enabling editor intellisense without requiring a full TypeScript compilation step.
 

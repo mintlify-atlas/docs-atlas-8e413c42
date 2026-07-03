@@ -1,7 +1,7 @@
 ---
-title: "GET /api/v1/inventario/{productoId}/stock"
+title: "GET Inventory Stock by Product ID — InnovaTech API"
 sidebarTitle: "GET Stock"
-description: "GET /api/v1/inventario/{productoId}/stock — retrieves the current available stock count for a product. Returns an integer, or 0 if the product is not found."
+description: "Retrieve the current stock count for a product by ID. Returns a plain integer via GET /api/v1/inventario/{productoId}/stock, or 0 if not found."
 ---
 
 This endpoint retrieves the current available stock count for a single product identified by its `productoId`. The response is a plain integer — not a JSON object — representing how many units are currently available in the inventory table. If the requested `productoId` does not exist in the database, the endpoint returns `0` rather than an error, making it safe to call speculatively without prior existence checks.
@@ -64,6 +64,7 @@ The `Inventario` entity backing this query is defined as:
 ```java
 @Entity
 @Table(name = "inventario")
+@Data
 public class Inventario {
 
     @Id

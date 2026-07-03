@@ -1,7 +1,7 @@
 ---
-title: "POST /api/v1/inventario/{productoId}/descontar"
+title: "POST Decrement Product Stock — Inventory Service API"
 sidebarTitle: "POST Descontar"
-description: "POST /api/v1/inventario/{productoId}/descontar — atomically decrements stock for a product by the given quantity. Returns 400 if stock is insufficient."
+description: "Atomically decrements product stock via POST /api/v1/inventario/{productoId}/descontar. Returns 400 for insufficient stock, 500 if product not found."
 ---
 
 This endpoint performs an atomic, transactional decrement of available stock for a given product. It is the core write operation of `servicio-inventario` and is designed to be called as part of a larger SAGA transaction orchestrated by `servicio-ventapos`. The decrement only proceeds when the current `stockDisponible` is greater than or equal to the requested `cantidad`; otherwise the operation is rejected and no data is modified. Because the method is annotated with `@Transactional`, partial writes cannot occur even under concurrent load.
@@ -35,11 +35,15 @@ POST /api/v1/inventario/{productoId}/descontar
 </ResponseField>
 
 <ResponseField name="400 Bad Request" type="string">
-  Returned when the stock is insufficient to fulfil the request, or when the `productoId` is not found in the database. Response body is the plain string:
+  Returned when the current `stockDisponible` is less than the requested `cantidad`. The product exists in the database but does not have enough units to fulfil the request. Response body is the plain string:
 
   ```
   Stock insuficiente o producto no encontrado
   ```
+</ResponseField>
+
+<ResponseField name="500 Internal Server Error" type="string">
+  Returned when the `productoId` does not exist in the `inventario` table. The service method throws an uncaught `RuntimeException("Producto no encontrado en inventario")`, which Spring Boot converts to an HTTP 500 response. The controller does not catch this exception.
 </ResponseField>
 
 ## Example Request
@@ -56,17 +60,21 @@ curl -X POST "http://localhost:8080/api/v1/inventario/PROD-001/descontar?cantida
 Stock descontado exitosamente
 ```
 
-**Failure — insufficient stock or product not found (400 Bad Request):**
+**Failure — insufficient stock (400 Bad Request):**
 
 ```
 Stock insuficiente o producto no encontrado
 ```
 
+**Failure — product not found (500 Internal Server Error):**
+
+Spring Boot returns a default error response body. The `RuntimeException` thrown by the service is not caught by the controller, so no custom response body is produced for this case.
+
 ## Business Rules
 
 - **Atomic operation:** The service method is annotated `@Transactional`, so the read-check-write sequence is executed within a single database transaction. If any step fails, the transaction is rolled back automatically.
 - **Stock guard:** The decrement only executes if `inventario.getStockDisponible() >= cantidad`. If this condition is not met, the method returns `false` and the controller responds with HTTP 400. No data is written.
-- **Product not found:** If `inventarioRepository.findByProductoId(productoId)` returns an empty `Optional`, a `RuntimeException` is thrown (`"Producto no encontrado en inventario"`), which is caught by the controller logic and results in an HTTP 400 response.
+- **Product not found:** If `inventarioRepository.findByProductoId(productoId)` returns an empty `Optional`, the service throws `RuntimeException("Producto no encontrado en inventario")`. This exception is **not caught** in the controller, so Spring Boot handles it as an unhandled exception and returns HTTP **500 Internal Server Error**.
 - **No fractional quantities:** `cantidad` is an `Integer` — decimal values are not accepted.
 
 ## Source Implementation

@@ -1,7 +1,7 @@
 ---
-title: "InnovaTech SOA REST API Overview"
+title: "InnovaTech SOA REST API — Gateway & Routing Guide"
 sidebarTitle: "Overview"
-description: "All InnovaTech SOA REST APIs are exposed through a centralized Spring Cloud Gateway on port 8080. Learn the base URL, routing structure, and available service namespaces."
+description: "InnovaTech REST APIs route through a centralized Spring Cloud Gateway on port 8080. Covers base URL, routing namespaces, CORS policy, and health checks."
 ---
 
 InnovaTech SOA is an omnichannel e-commerce platform built on Service-Oriented Architecture principles. Every REST endpoint in the system — whether it belongs to the catalog, inventory, or POS sales orchestrator — is exposed to clients through a single, centralized **Spring Cloud Gateway** running on port `8080`. This means frontend applications, mobile clients, and integration partners never communicate with individual microservices directly; they always talk to the gateway, which handles routing, CORS enforcement, and request forwarding transparently.
@@ -72,13 +72,12 @@ The `info` endpoint is also exposed at `http://localhost:8080/actuator/info`.
 
 ## Interactive API Docs
 
-Each microservice generates its own interactive Swagger UI automatically via SpringDoc OpenAPI. You can explore and test endpoints directly in the browser at the service's native port — no authentication required during local development.
+The catalog service generates a fully interactive Swagger UI automatically via SpringDoc OpenAPI. You can explore and test catalog endpoints directly in the browser at the service's native port — no authentication required during local development.
 
 | Service | Swagger UI URL | OpenAPI JSON |
 |---|---|---|
 | servicio-catalogo | http://localhost:8084/swagger-ui.html | http://localhost:8084/api-docs |
-| servicio-inventario | http://localhost:8081/swagger-ui.html | — |
 
 <Note>
-  Swagger UI is available on the service's direct port, not through the gateway. This is intentional — the Swagger UI URLs are development tools and are not routed through port 8080.
+  Swagger UI is available on the catalog service's direct port, not through the gateway. This is intentional — the Swagger UI URL is a development tool and is not routed through port 8080. The inventory service (`servicio-inventario`) does not include a Swagger UI.
 </Note>

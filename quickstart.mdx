@@ -1,7 +1,7 @@
 ---
-title: "Get Started with InnovaTech SOA Locally"
+title: "Quickstart: Run InnovaTech SOA on Your Local Machine"
 sidebarTitle: "Quickstart"
-description: "Set up InnovaTech SOA on your local machine using Docker Compose and Maven in under 10 minutes."
+description: "Set up InnovaTech SOA locally in under 10 minutes: launch PostgreSQL and MongoDB via Docker, start all five Spring Boot services, and run a React frontend."
 ---
 
 This guide walks you through running the complete InnovaTech SOA platform on your local development machine. By the end you will have both databases running in Docker, all five Spring Boot services registered with Eureka, and at least one React frontend serving traffic — all communicating through the API Gateway on port `8080`.
@@ -184,8 +184,6 @@ Once all services are running, use the following URLs to confirm each component 
 | Eureka Dashboard | `http://localhost:8761` | All three domain services listed as `UP` |
 | API Gateway health | `http://localhost:8080/actuator/health` | `{"status":"UP"}` |
 | Catalog Swagger UI | `http://localhost:8084/swagger-ui.html` | Interactive API docs for `servicio-catalogo` |
-| Inventory Swagger UI | `http://localhost:8081/swagger-ui.html` | Interactive API docs for `servicio-inventario` |
-| POS Swagger UI | `http://localhost:8082/swagger-ui.html` | Interactive API docs for `servicio-ventapos` |
 
 ### Sample API Call — Inventory Stock Check
 
@@ -195,7 +193,7 @@ The following `curl` command queries the inventory service for the current stock
 curl http://localhost:8080/api/v1/inventario/{productoId}/stock
 ```
 
-Replace `{productoId}` with a valid product identifier from your catalog. The gateway forwards the request to `servicio-inventario` on port `8081` and returns the stock JSON response directly to the caller.
+Replace `{productoId}` with a valid product identifier from your catalog. The gateway forwards the request to `servicio-inventario` on port `8081` and returns the stock count as a plain integer (e.g., `42`) directly to the caller.
 
 ---
 

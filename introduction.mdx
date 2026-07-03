@@ -1,7 +1,7 @@
 ---
-title: "InnovaTech SOA: Omnichannel Commerce on Microservices"
+title: "InnovaTech SOA: Omnichannel Commerce via Microservices"
 sidebarTitle: "Introduction"
-description: "Learn what InnovaTech SOA is, how its Service-Oriented Architecture works, and the core principles behind its omnichannel design."
+description: "Learn what InnovaTech SOA is, how its Service-Oriented Architecture unifies POS and web channels, and the core principles behind its omnichannel design."
 ---
 
 InnovaTech SOA is an omnichannel e-commerce platform that unifies physical point-of-sale (POS) operations and digital web commerce under a single, cohesive backend. Built on strict Service-Oriented Architecture principles, it eliminates the data silos that plague traditional retail systems — where inventory, catalog, and customer records live in disconnected databases — by exposing every business capability as an independently deployable, loosely coupled service behind a centralized API Gateway.
@@ -41,7 +41,7 @@ No cross-database JOINs exist in the system. Data shared between services is pas
 POS sales are multi-step transactions that touch inventory, customer validation, and payment. InnovaTech implements the SAGA pattern in `servicio-ventapos`: each step in a sale is executed sequentially, and if any downstream service returns a failure, the orchestrator issues compensating rollback calls to undo the completed steps. This guarantees eventual consistency without distributed two-phase commits.
 
 <Note>
-  The SAGA implementation in InnovaTech is synchronous (choreography via direct REST calls from the orchestrator). An asynchronous, event-driven variant using a message broker is a natural next evolution of this architecture.
+  The current SAGA implementation in InnovaTech uses the orchestration style: `servicio-ventapos` makes direct REST calls to each downstream service in sequence and handles rollback in the same request thread. An asynchronous, event-driven variant using a message broker is a natural next evolution.
 </Note>
 
 ## Service Inventory
@@ -54,7 +54,7 @@ The following table lists every runtime component in the InnovaTech SOA platform
 | `eureka-server` | `8761` | — | Service registry and discovery dashboard for all Spring Boot services |
 | `servicio-catalogo` | `8084` | MongoDB 6.0 | Product and pricing catalog for the web channel |
 | `servicio-inventario` | `8081` | PostgreSQL 15 | Kardex-based inventory control with logical warehouse segmentation (Web/Physical) |
-| `servicio-ventapos` | `8082` | PostgreSQL 15 | POS sales orchestrator; implements the SAGA pattern across inventory, customers, and payments |
+| `servicio-ventapos` | `8082` | — | POS sales orchestrator; implements the SAGA pattern across inventory, customers, and payments |
 
 <Note>
   `api-gateway` and `eureka-server` are infrastructure services with no business logic. They do not connect to any application database. All frontends communicate exclusively through `api-gateway` on port `8080` — they never call domain services directly.
@@ -67,10 +67,10 @@ InnovaTech SOA is built on a carefully chosen, modern open-source stack. Every v
 | Layer | Technology | Version |
 |---|---|---|
 | Language | Java | 17 |
-| Backend framework | Spring Boot | 3.2.4 |
-| Cloud libraries | Spring Cloud | 2023.0.1 |
-| Service discovery | Netflix Eureka (Spring Cloud Netflix) | 2023.0.1 |
-| API gateway | Spring Cloud Gateway | 2023.0.1 |
+| Backend framework | Spring Boot | 3.1.2 – 3.2.4 (per service) |
+| Cloud libraries | Spring Cloud | 2022.0.4 – 2023.0.1 (per service) |
+| Service discovery | Netflix Eureka (Spring Cloud Netflix) | Spring Cloud 2022.0.4+ |
+| API gateway | Spring Cloud Gateway | Spring Cloud 2023.0.1 |
 | Relational database | PostgreSQL | 15 (Alpine image) |
 | Document database | MongoDB | 6.0 |
 | Web frontend | React + Vite | React 19, Vite 8 |

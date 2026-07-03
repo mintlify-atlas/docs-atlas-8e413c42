@@ -1,5 +1,5 @@
 ---
-title: "InnovaTech SOA Architecture and Service Topology"
+title: "InnovaTech SOA: Architecture and Service Topology Guide"
 sidebarTitle: "Architecture"
 description: "Deep dive into InnovaTech's SOA topology: service layers, data isolation patterns, API Gateway routing rules, and the SAGA transaction model."
 ---
@@ -124,9 +124,9 @@ InnovaTech enforces the **Database-per-Service** pattern: each domain service ow
 Services that require ACID guarantees and relational consistency use PostgreSQL 15:
 
 - **`servicio-inventario`** — Manages the inventory Kardex with logical warehouse segmentation (web channel vs. physical store). Hibernate auto-generates the schema on startup (`ddl-auto: update`).
-- **`servicio-ventapos`** — Records POS transactions and customer associations. Uses Spring Data JPA with the PostgreSQL dialect.
+- **`servicio-ventapos`** — Orchestrates POS transactions by calling downstream services (inventory, customers, payment). It does not have a direct database dependency in its current implementation.
 
-Both services connect to the same `innovatech_db` database on the shared `innovatech-postgres` Docker container, but each service manages only its own schema tables. The datasource configuration for `servicio-inventario` is:
+`servicio-inventario` connects to the `innovatech_db` PostgreSQL database. The datasource configuration is:
 
 ```yaml
 spring:
@@ -224,7 +224,7 @@ If any step returns an error, the orchestrator issues **compensating transaction
 This ensures the system never reaches a state where inventory has been decremented but no sale record exists, or vice versa.
 
 <Note>
-  The current SAGA implementation is **synchronous**: `servicio-ventapos` makes blocking HTTP calls to each downstream service in sequence and handles rollback in the same request thread. This keeps the implementation simple and observable but means a slow downstream service will block the entire sale transaction.
+  The SAGA implementation uses the **orchestration** style: `servicio-ventapos` makes direct HTTP calls to each downstream service in sequence and handles compensating rollback in the same request flow. This keeps the implementation simple and observable, but a slow downstream service will block the entire sale transaction.
 </Note>
 
 ---

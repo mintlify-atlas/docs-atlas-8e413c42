@@ -1,14 +1,14 @@
 ---
 title: "POS Sales Service: SAGA Orchestration for Physical Sales"
 sidebarTitle: "POS Sales Service"
-description: "The servicio-ventapos orchestrates physical point-of-sale transactions, coordinating inventory, customers, and payment using the SAGA pattern for reliable rollback."
+description: "servicio-ventapos orchestrates POS transactions on port 8082, coordinating inventory and payment using the SAGA pattern for consistent logical rollback."
 ---
 
 The POS Sales Service is the transaction director for InnovaTech's physical store channel. When a cashier processes a sale at a point-of-sale terminal, every step of that transaction — validating the customer, checking and reserving inventory, processing payment, and recording the completed sale — flows through this service. Rather than letting those steps happen independently, `servicio-ventapos` orchestrates them in a defined sequence and, critically, is responsible for issuing compensating rollback calls if any step fails partway through.
 
 ## Overview
 
-`servicio-ventapos` is a **Task Service / BFF (Backend for Frontend)** in the SOA topology, meaning it does not own a domain data store of its own. Its role is purely orchestration: receiving a sale request, calling the appropriate entity services in order, and resolving the transaction to either a confirmed sale or a fully compensated rollback. It runs on **port 8082** and registers with the Eureka Server for service discovery. The service is built on **Spring Boot 3.1.2** with both `spring-boot-starter-web` (blocking MVC) and `spring-boot-starter-webflux` (reactive WebClient) on the classpath, allowing it to make non-blocking outbound calls to downstream services via `WebClient` while still exposing a conventional MVC REST API to its callers.
+`servicio-ventapos` is a **Task Service / BFF (Backend for Frontend)** in the SOA topology, meaning it does not own a domain data store of its own. Its role is purely orchestration: receiving a sale request, calling the appropriate entity services in order, and resolving the transaction to either a confirmed sale or a fully compensated rollback. It runs on **port 8082** and registers with the Eureka Server for service discovery. The service is built on **Spring Boot 3.1.2** with both `spring-boot-starter-web` (blocking MVC) and `spring-boot-starter-webflux` (reactive WebClient) on the classpath, enabling non-blocking outbound HTTP calls to downstream services alongside a conventional MVC REST API surface.
 
 <CardGroup cols={2}>
   <Card title="Port" icon="plug">
@@ -44,13 +44,13 @@ A complete POS sale transaction proceeds through the following steps. If any ste
     Call `servicio-clientes` to confirm that the customer exists and is eligible to make a purchase (e.g., account is active, no outstanding blocks). If validation fails, the transaction is rejected immediately with no state changes to undo.
   </Step>
   <Step title="Check and Decrement Inventory">
-    Call `servicio-inventario` at `POST /api/inventario/{productoId}/descontar?cantidad={n}` for each product in the sale. The inventory service atomically checks that sufficient stock exists and decrements it. If any product returns `400 Stock insuficiente`, the orchestrator triggers compensation for any items already decremented in this step and aborts.
+    Call `servicio-inventario` at `POST /api/inventario/{productoId}/descontar?cantidad={n}` for each product in the sale. The inventory service atomically checks that sufficient stock exists and decrements it. If any product returns a failure response, the orchestrator triggers compensation for any items already decremented in this step and aborts.
   </Step>
   <Step title="Process Payment">
-    Submit the total sale amount to the payment gateway. If payment is declined or the gateway returns an error, the orchestrator issues compensating inventory restoration calls (`POST /api/inventario/{productoId}/descontar` with a negative quantity, or a dedicated restore endpoint) to undo the stock decrements from Step 2, then returns a failure response to the POS terminal.
+    Submit the total sale amount to the payment gateway. If payment is declined or the gateway returns an error, the orchestrator issues compensating inventory restoration calls to undo the stock decrements from Step 2, then returns a failure response to the POS terminal.
   </Step>
   <Step title="Confirm Sale">
-    Once payment is successful, record the completed sale (line items, customer, timestamp, payment reference) in the service's own data store or forward the confirmation event to a downstream reporting service. Return a success response to the POS terminal with the sale receipt details.
+    Once payment is successful, record the completed sale and return a success response to the POS terminal with the sale confirmation details.
   </Step>
 </Steps>
 
@@ -58,32 +58,16 @@ If a failure occurs at **Step 2** or **Step 3**, `servicio-ventapos` executes co
 
 ## Gateway Path
 
-All POS transaction requests from frontend clients must be routed through the API Gateway. The gateway's `ruta-orquestador-pos` route maps the external path prefix to this service.
+All POS transaction requests from frontend clients must be routed through the API Gateway. The gateway's `ruta-orquestador-pos` route maps the `/api/v1/ventas-pos/**` path prefix to this service on port 8082.
 
 | Context | Base Path |
 |---|---|
 | Via API Gateway (external) | `http://localhost:8080/api/v1/ventas-pos/**` |
-| Direct to service (internal) | `http://localhost:8082/api/v1/ventas-pos/**` |
-
-Example sale request through the gateway:
-
-```bash
-POST http://localhost:8080/api/v1/ventas-pos/procesar
-Content-Type: application/json
-
-{
-  "clienteId": "CLI-001",
-  "items": [
-    { "productoId": "PROD-42", "cantidad": 2 },
-    { "productoId": "PROD-17", "cantidad": 1 }
-  ],
-  "metodoPago": "TARJETA"
-}
-```
+| Direct to service (internal) | `http://localhost:8082/**` |
 
 ## Integration Points
 
-`servicio-ventapos` integrates with three external systems during a transaction. All calls are outbound HTTP — the POS service acts as client, not server, in these interactions.
+`servicio-ventapos` integrates with downstream services during a transaction. All calls are outbound HTTP — the POS service acts as client, not server, in these interactions.
 
 | Downstream Service | Call | Purpose |
 |---|---|---|
